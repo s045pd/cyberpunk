@@ -4,6 +4,7 @@ import { createSky } from './atmosphere/sky';
 import { FlyControls } from './controls/flyControls';
 import { generatePlots } from './city/layout';
 import { createBuildings } from './city/buildings';
+import { createGround } from './city/ground';
 
 export interface Updatable {
   update(dt: number, t: number): void;
@@ -22,6 +23,8 @@ const plots = generatePlots(SEED);
 const buildings = createBuildings(plots, SEED);
 engine.scene.add(buildings.group);
 updatables.push(buildings);
+
+engine.scene.add(createGround());
 
 const fly = new FlyControls(engine.camera, canvas);
 updatables.push({ update: (dt) => fly.update(dt) });
