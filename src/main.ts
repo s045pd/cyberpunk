@@ -6,6 +6,7 @@ import { generatePlots } from './city/layout';
 import { createBuildings } from './city/buildings';
 import { createGround } from './city/ground';
 import { createNeon } from './city/neon';
+import { createLandmarks } from './city/landmarks/index';
 
 export interface Updatable {
   update(dt: number, t: number): void;
@@ -30,6 +31,8 @@ engine.scene.add(createGround());
 const neon = createNeon(plots, SEED);
 engine.scene.add(neon.group);
 updatables.push(neon);
+
+engine.scene.add(createLandmarks(SEED));
 
 const fly = new FlyControls(engine.camera, canvas);
 updatables.push({ update: (dt) => fly.update(dt) });
