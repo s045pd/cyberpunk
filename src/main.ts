@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { BlendFunction } from 'postprocessing';
 import { createEngine } from './core/engine';
+import { QualityMonitor, QUALITY_PRESETS } from './core/quality';
 import { createSky } from './atmosphere/sky';
 import { createRain } from './atmosphere/rain';
 import { LightningDirector } from './atmosphere/lightning';
@@ -22,10 +24,29 @@ export interface Updatable {
 
 export const SEED = 20770703;
 
+function showFatal(overlay: HTMLElement, title: string, body: string): void {
+  overlay.innerHTML = `
+    <div class="fatal">
+      <div class="fatal-title">${title}</div>
+      <div class="fatal-body">${body}</div>
+    </div>`;
+  overlay.style.pointerEvents = 'auto';
+}
+
 async function start(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>('#scene')!;
   const overlay = document.querySelector<HTMLDivElement>('#overlay')!;
   overlay.textContent = '';
+
+  if (!document.createElement('canvas').getContext('webgl2')) {
+    showFatal(
+      overlay,
+      '// SIGNAL LOST',
+      '此浏览器不支持 WebGL2。请使用最新版 Chrome / Edge / Safari / Firefox。',
+    );
+    return;
+  }
+
   const boot = new BootScreen(overlay, 6);
 
   const engine = createEngine(canvas);
@@ -65,8 +86,6 @@ async function start(): Promise<void> {
       return { airTraffic: air, groundTraffic: ground };
     },
   );
-  void airTraffic;
-  void groundTraffic;
 
   const { rain, lightning } = await boot.step('召唤雨云 // SEEDING RAIN', () => {
     const r = createRain(SEED);
@@ -78,8 +97,6 @@ async function start(): Promise<void> {
     updatables.push({ update: (dt) => l.update(dt) });
     return { rain: r, lightning: l };
   });
-  void rain;
-  void lightning;
 
   const fly = new FlyControls(engine.camera, canvas);
   const walk = new WalkControls(engine.camera, canvas);
@@ -93,16 +110,48 @@ async function start(): Promise<void> {
     { update: (dt) => hud.update(dt, engine.camera.position) },
   );
 
+  const monitor = new QualityMonitor();
+  const applyQuality = () => {
+    const q = QUALITY_PRESETS[monitor.level];
+    engine.setRenderScale(q.renderScale);
+    engine.bloom.intensity = q.bloomIntensity;
+    engine.chromatic.blendMode.setBlendFunction(
+      q.chromatic ? BlendFunction.NORMAL : BlendFunction.SKIP,
+    );
+    rain.setDensity(q.rainScale);
+    airTraffic.setDensity(q.trafficScale);
+    groundTraffic.setDensity(q.trafficScale);
+    lightning.enabled = q.lightning;
+    hud.setQualityName(q.name);
+  };
+  applyQuality();
+
   await boot.waitForStart();
 
   const timer = new THREE.Timer();
+  let frameErrors = 0;
   function loop(): void {
     requestAnimationFrame(loop);
     timer.update();
     const dt = Math.min(timer.getDelta(), 0.1);
     const t = timer.getElapsed();
-    for (const u of updatables) u.update(dt, t);
-    engine.render(dt);
+    try {
+      for (const u of updatables) u.update(dt, t);
+      if (monitor.addFrame(dt)) applyQuality();
+      engine.render(dt);
+      frameErrors = 0;
+    } catch (err) {
+      frameErrors++;
+      console.error('[night-city] frame error', err);
+      if (frameErrors > 30) {
+        showFatal(
+          overlay,
+          '// FLATLINED',
+          '渲染循环连续出错，请刷新页面。详情见控制台。',
+        );
+        throw err;
+      }
+    }
   }
   loop();
 }

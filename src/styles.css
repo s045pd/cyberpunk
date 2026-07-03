@@ -125,6 +125,22 @@ html, body { height: 100%; overflow: hidden; background: var(--color-bg); }
   97% { opacity: 0.6; }
 }
 
+/* ---------- 致命错误覆盖层 ---------- */
+.fatal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--color-bg);
+}
+
+.fatal-title { color: #ff2975; font-size: 28px; letter-spacing: 0.3em; }
+
+.fatal-body { color: var(--color-hud-dim); font-size: 14px; }
+
 @keyframes boot-glitch {
   0%, 78%, 100% { transform: translateX(0); clip-path: inset(28% 0 52% 0); }
   80% { transform: translateX(-6px); clip-path: inset(10% 0 70% 0); }
