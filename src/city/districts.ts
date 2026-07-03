@@ -28,7 +28,7 @@ export const DISTRICTS: District[] = [
   {
     id: 'watson',
     style: {
-      label: 'WATSON', heightRange: [40, 190], heightBias: 1.6, cellSize: 58,
+      label: 'WATSON', heightRange: [40, 190], heightBias: 1.6, cellSize: 34,
       density: 0.93, windowLitRate: 0.5, facadeColor: 0x18202c,
       neonDensity: 1.0, neonPalette: [0xff2975, 0x00ffd5, 0xffe600, 0xff6a00],
     },
@@ -37,7 +37,7 @@ export const DISTRICTS: District[] = [
   {
     id: 'westbrook',
     style: {
-      label: 'WESTBROOK', heightRange: [60, 250], heightBias: 1.4, cellSize: 70,
+      label: 'WESTBROOK', heightRange: [60, 250], heightBias: 1.4, cellSize: 42,
       density: 0.82, windowLitRate: 0.55, facadeColor: 0x1b1826,
       neonDensity: 0.8, neonPalette: [0xff7ad9, 0xb96bff, 0x00e5ff],
     },
@@ -46,7 +46,7 @@ export const DISTRICTS: District[] = [
   {
     id: 'city-center',
     style: {
-      label: 'CITY CENTER', heightRange: [120, 450], heightBias: 2.0, cellSize: 88,
+      label: 'CITY CENTER', heightRange: [120, 450], heightBias: 2.0, cellSize: 64,
       density: 0.85, windowLitRate: 0.6, facadeColor: 0x101724,
       neonDensity: 0.5, neonPalette: [0x00e5ff, 0xffd24a, 0xff2975],
     },
@@ -55,7 +55,7 @@ export const DISTRICTS: District[] = [
   {
     id: 'heywood',
     style: {
-      label: 'HEYWOOD', heightRange: [30, 130], heightBias: 1.7, cellSize: 62,
+      label: 'HEYWOOD', heightRange: [30, 130], heightBias: 1.7, cellSize: 38,
       density: 0.88, windowLitRate: 0.45, facadeColor: 0x201c18,
       neonDensity: 0.35, neonPalette: [0xffd24a, 0xff6a00, 0x00ffd5],
     },
@@ -64,7 +64,7 @@ export const DISTRICTS: District[] = [
   {
     id: 'santo-domingo',
     style: {
-      label: 'SANTO DOMINGO', heightRange: [20, 95], heightBias: 1.8, cellSize: 96,
+      label: 'SANTO DOMINGO', heightRange: [20, 95], heightBias: 1.8, cellSize: 62,
       density: 0.62, windowLitRate: 0.35, facadeColor: 0x241d14,
       neonDensity: 0.25, neonPalette: [0xff9e3d, 0xffd24a],
     },
@@ -73,7 +73,7 @@ export const DISTRICTS: District[] = [
   {
     id: 'pacifica',
     style: {
-      label: 'PACIFICA', heightRange: [15, 75], heightBias: 1.9, cellSize: 66,
+      label: 'PACIFICA', heightRange: [15, 75], heightBias: 1.9, cellSize: 40,
       density: 0.5, windowLitRate: 0.15, facadeColor: 0x161a1a,
       neonDensity: 0.12, neonPalette: [0x00ffd5, 0xff2975],
     },
