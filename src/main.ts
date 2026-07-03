@@ -7,6 +7,8 @@ import { createBuildings } from './city/buildings';
 import { createGround } from './city/ground';
 import { createNeon } from './city/neon';
 import { createLandmarks } from './city/landmarks/index';
+import { createAirTraffic } from './traffic/airTraffic';
+import { createGroundTraffic } from './traffic/groundTraffic';
 
 export interface Updatable {
   update(dt: number, t: number): void;
@@ -33,6 +35,14 @@ engine.scene.add(neon.group);
 updatables.push(neon);
 
 engine.scene.add(createLandmarks(SEED));
+
+const airTraffic = createAirTraffic(SEED);
+const groundTraffic = createGroundTraffic(SEED);
+engine.scene.add(airTraffic.points, groundTraffic.points);
+updatables.push(
+  { update: (dt) => airTraffic.update(dt) },
+  { update: (dt) => groundTraffic.update(dt) },
+);
 
 const fly = new FlyControls(engine.camera, canvas);
 updatables.push({ update: (dt) => fly.update(dt) });
