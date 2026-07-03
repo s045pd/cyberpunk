@@ -1,0 +1,149 @@
+:root {
+  --color-hud: #fcee0a;
+  --color-hud-dim: rgba(252, 238, 10, 0.55);
+  --color-bg: #050507;
+  --color-accent: #00e5ff;
+  --font-mono: "SF Mono", "Cascadia Code", "JetBrains Mono", ui-monospace, monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { height: 100%; overflow: hidden; background: var(--color-bg); }
+
+#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+#overlay { position: fixed; inset: 0; pointer-events: none; font-family: var(--font-mono); }
+
+/* ---------- HUD ---------- */
+.hud-district {
+  position: absolute;
+  top: clamp(18px, 4vh, 44px);
+  left: clamp(18px, 4vw, 56px);
+  color: var(--color-hud);
+  font-size: clamp(20px, 2.6vw, 38px);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-shadow: 0 0 12px rgba(252, 238, 10, 0.45);
+}
+
+.hud-keys {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  color: var(--color-hud-dim);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.hud-stats {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  color: var(--color-accent);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+}
+
+/* ---------- 启动画面 ---------- */
+.boot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: var(--color-bg);
+  pointer-events: auto;
+  transition: opacity 0.7s ease;
+}
+
+.boot-out { opacity: 0; pointer-events: none; }
+
+.boot-title {
+  position: relative;
+  color: var(--color-hud);
+  font-size: clamp(42px, 8vw, 96px);
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  animation: boot-flicker 3.2s infinite;
+}
+
+.boot-title::before {
+  content: attr(data-text);
+  position: absolute;
+  left: 2px;
+  top: 0;
+  color: var(--color-accent);
+  clip-path: inset(28% 0 52% 0);
+  animation: boot-glitch 2.1s infinite steps(1);
+  opacity: 0.75;
+}
+
+.boot-sub { color: var(--color-hud-dim); font-size: 13px; letter-spacing: 0.3em; }
+
+.boot-bar {
+  width: min(420px, 70vw);
+  height: 4px;
+  border: 1px solid var(--color-hud-dim);
+}
+
+.boot-bar-fill {
+  width: 0%;
+  height: 100%;
+  background: var(--color-hud);
+  transition: width 0.25s ease;
+}
+
+.boot-label { color: var(--color-accent); font-size: 12px; letter-spacing: 0.24em; }
+
+.boot-start {
+  margin-top: 10px;
+  padding: 12px 46px;
+  background: transparent;
+  border: 1px solid var(--color-hud);
+  color: var(--color-hud);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  letter-spacing: 0.3em;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, opacity 0.2s;
+}
+
+.boot-start:disabled { opacity: 0.3; cursor: wait; }
+
+.boot-start:not(:disabled):hover {
+  background: var(--color-hud);
+  color: var(--color-bg);
+  box-shadow: 0 0 24px rgba(252, 238, 10, 0.5);
+}
+
+@keyframes boot-flicker {
+  0%, 92%, 100% { opacity: 1; }
+  93% { opacity: 0.4; }
+  94% { opacity: 1; }
+  97% { opacity: 0.6; }
+}
+
+/* ---------- 致命错误覆盖层 ---------- */
+.fatal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--color-bg);
+}
+
+.fatal-title { color: #ff2975; font-size: 28px; letter-spacing: 0.3em; }
+
+.fatal-body { color: var(--color-hud-dim); font-size: 14px; }
+
+@keyframes boot-glitch {
+  0%, 78%, 100% { transform: translateX(0); clip-path: inset(28% 0 52% 0); }
+  80% { transform: translateX(-6px); clip-path: inset(10% 0 70% 0); }
+  86% { transform: translateX(5px); clip-path: inset(60% 0 18% 0); }
+  92% { transform: translateX(-3px); clip-path: inset(40% 0 40% 0); }
+}
