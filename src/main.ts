@@ -29,11 +29,12 @@ engine.scene.add(createGround());
 const fly = new FlyControls(engine.camera, canvas);
 updatables.push({ update: (dt) => fly.update(dt) });
 
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
 function loop() {
   requestAnimationFrame(loop);
-  const dt = Math.min(clock.getDelta(), 0.1);
-  const t = clock.elapsedTime;
+  timer.update();
+  const dt = Math.min(timer.getDelta(), 0.1);
+  const t = timer.getElapsed();
   for (const u of updatables) u.update(dt, t);
   engine.render(dt);
 }

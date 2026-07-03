@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { EffectComposer, RenderPass } from 'postprocessing';
+import {
+  EffectComposer, RenderPass, EffectPass,
+  BloomEffect, VignetteEffect, ChromaticAberrationEffect,
+  ToneMappingEffect, ToneMappingMode,
+} from 'postprocessing';
 
 export interface Engine {
   renderer: THREE.WebGLRenderer;
@@ -7,6 +11,8 @@ export interface Engine {
   camera: THREE.PerspectiveCamera;
   composer: EffectComposer;
   moonLight: THREE.DirectionalLight;
+  bloom: BloomEffect;
+  chromatic: ChromaticAberrationEffect;
   setRenderScale(scale: number): void;
   render(dt: number): void;
 }
@@ -42,6 +48,21 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   });
   composer.addPass(new RenderPass(scene, camera));
 
+  const bloom = new BloomEffect({
+    intensity: 1.15,
+    luminanceThreshold: 0.22,
+    luminanceSmoothing: 0.25,
+    mipmapBlur: true,
+  });
+  const chromatic = new ChromaticAberrationEffect({
+    offset: new THREE.Vector2(0.0008, 0.0008),
+    radialModulation: true,
+    modulationOffset: 0.35,
+  });
+  const vignette = new VignetteEffect({ darkness: 0.55, offset: 0.32 });
+  const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
+  composer.addPass(new EffectPass(camera, bloom, vignette, chromatic, tone));
+
   let renderScale = 1;
   const applySize = () => {
     const pr = Math.min(window.devicePixelRatio, 2) * renderScale;
@@ -54,7 +75,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   window.addEventListener('resize', applySize);
 
   return {
-    renderer, scene, camera, composer, moonLight,
+    renderer, scene, camera, composer, moonLight, bloom, chromatic,
     setRenderScale(scale: number) { renderScale = scale; applySize(); },
     render(dt: number) { composer.render(dt); },
   };
