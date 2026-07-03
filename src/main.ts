@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { createEngine } from './core/engine';
 import { createSky } from './atmosphere/sky';
+import { createRain } from './atmosphere/rain';
+import { LightningDirector } from './atmosphere/lightning';
 import { FlyControls } from './controls/flyControls';
 import { generatePlots } from './city/layout';
 import { createBuildings } from './city/buildings';
@@ -43,6 +45,15 @@ updatables.push(
   { update: (dt) => airTraffic.update(dt) },
   { update: (dt) => groundTraffic.update(dt) },
 );
+
+const rain = createRain(SEED);
+engine.scene.add(rain.points);
+updatables.push({
+  update: (dt, t) => rain.update(dt, t, engine.camera.position),
+});
+
+const lightning = new LightningDirector(sky, engine.moonLight, 0.35, SEED);
+updatables.push({ update: (dt) => lightning.update(dt) });
 
 const fly = new FlyControls(engine.camera, canvas);
 updatables.push({ update: (dt) => fly.update(dt) });
