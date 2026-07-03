@@ -4,6 +4,8 @@ import { createSky } from './atmosphere/sky';
 import { createRain } from './atmosphere/rain';
 import { LightningDirector } from './atmosphere/lightning';
 import { FlyControls } from './controls/flyControls';
+import { WalkControls } from './controls/walkControls';
+import { ModeManager } from './controls/modeSwitch';
 import { generatePlots } from './city/layout';
 import { createBuildings } from './city/buildings';
 import { createGround } from './city/ground';
@@ -56,7 +58,13 @@ const lightning = new LightningDirector(sky, engine.moonLight, 0.35, SEED);
 updatables.push({ update: (dt) => lightning.update(dt) });
 
 const fly = new FlyControls(engine.camera, canvas);
-updatables.push({ update: (dt) => fly.update(dt) });
+const walk = new WalkControls(engine.camera, canvas);
+const modes = new ModeManager(engine.camera, fly, walk);
+updatables.push(
+  { update: (dt) => fly.update(dt) },
+  { update: (dt) => walk.update(dt) },
+  { update: (dt) => modes.update(dt) },
+);
 
 const timer = new THREE.Timer();
 function loop() {
