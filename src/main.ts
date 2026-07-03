@@ -5,6 +5,7 @@ import { FlyControls } from './controls/flyControls';
 import { generatePlots } from './city/layout';
 import { createBuildings } from './city/buildings';
 import { createGround } from './city/ground';
+import { createNeon } from './city/neon';
 
 export interface Updatable {
   update(dt: number, t: number): void;
@@ -25,6 +26,10 @@ engine.scene.add(buildings.group);
 updatables.push(buildings);
 
 engine.scene.add(createGround());
+
+const neon = createNeon(plots, SEED);
+engine.scene.add(neon.group);
+updatables.push(neon);
 
 const fly = new FlyControls(engine.camera, canvas);
 updatables.push({ update: (dt) => fly.update(dt) });
