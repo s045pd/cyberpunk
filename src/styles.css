@@ -1,0 +1,15 @@
+:root {
+  --color-hud: #fcee0a;
+  --color-hud-dim: rgba(252, 238, 10, 0.55);
+  --color-bg: #050507;
+  --color-accent: #00e5ff;
+  --font-mono: "SF Mono", "Cascadia Code", "JetBrains Mono", ui-monospace, monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { height: 100%; overflow: hidden; background: var(--color-bg); }
+
+#scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+#overlay { position: fixed; inset: 0; pointer-events: none; font-family: var(--font-mono); }
