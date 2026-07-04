@@ -8,6 +8,8 @@ import { LightningDirector } from './atmosphere/lightning';
 import { generatePlots } from './city/layout';
 import { createBuildings } from './city/buildings';
 import { createGround, createStreetLamps } from './city/ground';
+import { createHighway } from './city/highway';
+import { createBridges } from './city/bridges';
 import { createNeon } from './city/neon';
 import { createLandmarks } from './city/landmarks/index';
 import { createAirTraffic } from './traffic/airTraffic';
@@ -54,6 +56,7 @@ async function start(): Promise<void> {
 
   const sky = createSky();
   engine.scene.add(sky.mesh);
+  updatables.push({ update: (_dt, t) => sky.update(t) });
 
   const plots = await boot.step('解析城区结构 // PARSING DISTRICTS', () =>
     generatePlots(SEED));
@@ -63,10 +66,15 @@ async function start(): Promise<void> {
   engine.scene.add(buildings.group);
   updatables.push(buildings);
 
-  await boot.step('铺设路网 // PAVING GRID', () => {
+  const highway = await boot.step('铺设路网 // PAVING GRID', () => {
     engine.scene.add(createGround(SEED));
     engine.scene.add(createStreetLamps());
     engine.scene.add(createLandmarks(SEED));
+    engine.scene.add(createBridges(plots, SEED));
+    const hw = createHighway(SEED);
+    engine.scene.add(hw.group);
+    updatables.push({ update: (dt) => hw.update(dt) });
+    return hw;
   });
 
   const neon = await boot.step('点亮霓虹 // IGNITING NEON', () =>
@@ -122,6 +130,7 @@ async function start(): Promise<void> {
     rain.setDensity(q.rainScale);
     airTraffic.setDensity(q.trafficScale);
     groundTraffic.setDensity(q.trafficScale);
+    highway.setDensity(q.trafficScale);
     lightning.enabled = q.lightning;
     hud.setQualityName(q.name);
   };
