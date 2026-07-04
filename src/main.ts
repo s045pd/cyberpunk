@@ -30,6 +30,7 @@ import { ActiveNpcPool } from './people/activeNpcs';
 import { ViolenceDirector } from './events/violence';
 import { CombatHud } from './ui/combatHud';
 import { Minimap } from './ui/minimap';
+import { KeysPanel } from './ui/keysPanel';
 import { createHighway } from './city/highway';
 import { createBridges } from './city/bridges';
 import { createNeon } from './city/neon';
@@ -266,6 +267,7 @@ async function start(): Promise<void> {
     } },
   );
 
+  new KeysPanel(overlay);
   const minimap = new Minimap(overlay, kits.venuePoints);
   const mmEuler = new THREE.Euler();
   updatables.push({
