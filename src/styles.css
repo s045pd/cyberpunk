@@ -44,6 +44,17 @@ html, body { height: 100%; overflow: hidden; background: var(--color-bg); }
   letter-spacing: 0.1em;
 }
 
+.hud-hint {
+  position: absolute;
+  bottom: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--color-hud);
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  text-shadow: 0 0 10px rgba(252, 238, 10, 0.5);
+}
+
 /* ---------- 启动画面 ---------- */
 .boot {
   position: absolute;

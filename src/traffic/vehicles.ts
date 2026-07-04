@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createRng, range, pick, Rng } from '../core/rng';
 import { FOG_COLOR, FOG_DENSITY } from '../core/engine';
+import { greenFor } from './trafficLights';
 
 export type VehicleKind = 'sedan' | 'van' | 'sport' | 'av' | 'police' | 'medevac';
 
@@ -16,6 +17,8 @@ export interface LaneDef {
   yOffset?: number;
   /** -1 反向行驶 */
   dir?: 1 | -1;
+  /** 直线路网车道：受红绿灯控制（需为 LineCurve3 且沿单轴） */
+  signalized?: boolean;
 }
 
 export interface FleetOptions {
@@ -202,6 +205,20 @@ interface Vehicle {
   lateral: number;
   yOffset: number;
   bobPhase: number;
+  hidden: boolean;
+}
+
+interface LaneStop {
+  param: number;      // 停止线（曲线参数，行进方向递增）
+  ix: number;
+  iz: number;
+  axisZ: boolean;
+}
+
+interface LaneControl {
+  stops: LaneStop[];
+  gapParam: number;   // 跟车间距（参数）
+  members: Vehicle[];
 }
 
 export function createVehicleMaterial(): THREE.ShaderMaterial {
@@ -222,6 +239,7 @@ export class VehicleFleet {
   private byKind: Vehicle[][] = [];
   private fullCounts: number[] = [];
   private samples: THREE.Vector3[][] = [];
+  private controls: Array<LaneControl | null> = [];
   private material: THREE.ShaderMaterial;
   private bob: number;
 
@@ -237,6 +255,7 @@ export class VehicleFleet {
       this.samples.push(lane.curve.getSpacedPoints(SAMPLES));
       const length = Math.max(lane.curve.getLength(), 1);
       const dir = lane.dir ?? 1;
+      this.controls.push(lane.signalized ? buildLaneControl(lane, length) : null);
       const weights = opts.kindWeights ?? opts.kinds.map(() => 1);
       const weightSum = weights.reduce((a, b) => a + b, 0);
       for (let i = 0; i < lane.count; i++) {
@@ -246,14 +265,17 @@ export class VehicleFleet {
           roll -= weights[w];
           if (roll <= 0) { kindIdx = w; break; }
         }
-        this.byKind[kindIdx].push({
+        const v: Vehicle = {
           laneIdx,
           t: rng(),
           speed: (range(rng, lane.speedRange[0], lane.speedRange[1]) / length) * dir,
           lateral: lane.lateralOffset ?? 0,
           yOffset: lane.yOffset ?? 0,
           bobPhase: range(rng, 0, Math.PI * 2),
-        });
+          hidden: false,
+        };
+        this.byKind[kindIdx].push(v);
+        this.controls[laneIdx]?.members.push(v);
       }
     });
 
@@ -296,7 +318,9 @@ export class VehicleFleet {
 
   setDensity(fraction: number): void {
     this.meshes.forEach((mesh, k) => {
-      mesh.count = Math.max(1, Math.floor(this.fullCounts[k] * fraction));
+      const visible = Math.max(1, Math.floor(this.fullCounts[k] * fraction));
+      mesh.count = visible;
+      this.byKind[k].forEach((v, i) => { v.hidden = i >= visible; });
     });
   }
 
@@ -309,12 +333,42 @@ export class VehicleFleet {
   update(dt: number, t: number): void {
     this.material.uniforms.uTime.value = t;
     const EPS = 2 / SAMPLES;
+
+    // 信号车道：红灯钳制 + 跟车排队（车道内按参数排序，从头车向后处理）
+    for (let li = 0; li < this.controls.length; li++) {
+      const ctl = this.controls[li];
+      if (!ctl) continue;
+      const active = ctl.members.filter((v) => !v.hidden);
+      active.sort((a, b) => a.t - b.t);
+      let aheadT = Infinity;
+      for (let i = active.length - 1; i >= 0; i--) {
+        const v = active[i];
+        let next = v.t + v.speed * dt;
+        // 红灯：钳在下一条停止线
+        for (const stop of ctl.stops) {
+          if (stop.param >= v.t - 1e-6 && next > stop.param) {
+            if (!greenFor(stop.axisZ, stop.ix, stop.iz, t)) next = stop.param;
+            break;
+          }
+        }
+        // 跟车：与前车保持间距
+        if (aheadT !== Infinity) next = Math.min(next, aheadT - ctl.gapParam);
+        v.t = Math.max(Math.min(next, 1), v.t >= 1 ? 0 : 0);
+        if (v.t >= 1) v.t -= 1;
+        aheadT = v.t;
+      }
+      // 头车过线循环：越界回卷
+      for (const v of active) if (v.t >= 1) v.t -= 1;
+    }
+
     this.meshes.forEach((mesh, kindIdx) => {
       const list = this.byKind[kindIdx];
       const visible = mesh.count;
       for (let i = 0; i < visible; i++) {
         const v = list[i];
-        v.t = ((v.t + v.speed * dt) % 1 + 1) % 1;
+        if (!this.controls[v.laneIdx]) {
+          v.t = ((v.t + v.speed * dt) % 1 + 1) % 1;
+        }
         const pts = this.samples[v.laneIdx];
         sampleAt(pts, v.t, this.pos);
         sampleAt(pts, ((v.t + EPS * Math.sign(v.speed || 1)) % 1 + 1) % 1, this.ahead);
@@ -345,4 +399,37 @@ function sampleAt(pts: THREE.Vector3[], t: number, out: THREE.Vector3): THREE.Ve
   const k = f - i;
   tmpA.copy(pts[Math.min(i + 1, pts.length - 1)]);
   return out.copy(pts[i]).lerp(tmpA, k);
+}
+
+/** 解析直线信号车道：沿单轴找出所有路口停止线（按行进方向参数升序） */
+function buildLaneControl(
+  lane: { curve: THREE.Curve<THREE.Vector3> },
+  length: number,
+): LaneControl {
+  const ROAD_SPACING = 480;
+  const RHW = 14;
+  const p0 = lane.curve.getPoint(0);
+  const p1 = lane.curve.getPoint(1);
+  const alongZ = Math.abs(p1.z - p0.z) > Math.abs(p1.x - p0.x);
+  const a0 = alongZ ? p0.z : p0.x;
+  const a1 = alongZ ? p1.z : p1.x;
+  const fixed = alongZ ? p0.x : p0.z;
+  const sign = Math.sign(a1 - a0) || 1;
+  const stops: LaneStop[] = [];
+  const kMin = Math.ceil(Math.min(a0, a1) / ROAD_SPACING);
+  const kMax = Math.floor(Math.max(a0, a1) / ROAD_SPACING);
+  for (let k = kMin; k <= kMax; k++) {
+    const inter = k * ROAD_SPACING;
+    const stopWorld = inter - sign * (RHW + 4);
+    const param = (stopWorld - a0) / (a1 - a0);
+    if (param <= 0.01 || param >= 0.99) continue;
+    stops.push({
+      param,
+      ix: alongZ ? Math.round(fixed / ROAD_SPACING) : k,
+      iz: alongZ ? k : Math.round(fixed / ROAD_SPACING),
+      axisZ: alongZ,
+    });
+  }
+  stops.sort((a, b) => a.param - b.param);
+  return { stops, gapParam: 7.5 / Math.max(length, 1), members: [] };
 }

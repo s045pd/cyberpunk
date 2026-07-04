@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { ColliderGrid } from '../src/core/collision';
 import { buildSidewalkPaths } from '../src/people/pedestrians';
 import { pickIncidentSites } from '../src/events/incidents';
-import { partitionOpenPlots } from '../src/city/interiors';
+import { doorInfoFor } from '../src/city/lobbies';
+import { buildKabukiLayout, MARKET_CENTER, MARKET_HALF, ALLEY_W } from '../src/city/kabukiMarket';
+import { greenFor, listIntersections, CYCLE } from '../src/traffic/trafficLights';
 import { coastXAt, WATER_EAST_MAX } from '../src/city/water';
 import { generatePlots, distToRoad } from '../src/city/layout';
 import { districtAt } from '../src/city/districts';
@@ -78,35 +80,69 @@ describe('pickIncidentSites', () => {
   });
 });
 
-describe('partitionOpenPlots', () => {
+describe('doorInfoFor（大堂门朝最近的路）', () => {
   const plots = generatePlots(SEED);
-  const { open, closed } = partitionOpenPlots(plots, SEED);
 
-  it('可进入建筑数量在预期范围且与封闭楼互斥', () => {
-    expect(open.length).toBeGreaterThanOrEqual(16);
-    expect(open.length).toBeLessThanOrEqual(30);
-    expect(open.length + closed.length).toBe(plots.length);
-  });
-
-  it('可进入建筑临街且足够高大', () => {
-    for (const p of open) {
-      expect(p.h).toBeGreaterThanOrEqual(30);
-      expect(Math.min(p.sx, p.sz)).toBeGreaterThanOrEqual(14);
-      const edgeGap = Math.min(
-        distToRoad(p.x) - p.sx / 2,
-        distToRoad(p.z) - p.sz / 2,
-      );
-      expect(edgeGap).toBeLessThan(20);
-      expect(edgeGap).toBeGreaterThan(-1e-6);
+  it('门所在面到路的距离不大于另一轴', () => {
+    for (const p of plots.slice(0, 500)) {
+      const info = doorInfoFor(p);
+      const gapX = distToRoad(p.x) - p.sx / 2;
+      const gapZ = distToRoad(p.z) - p.sz / 2;
+      if (info.axisX) expect(gapX).toBeLessThanOrEqual(gapZ + 1e-9);
+      else expect(gapZ).toBeLessThanOrEqual(gapX + 1e-9);
     }
   });
+});
 
-  it('彼此间距足够分散', () => {
-    for (let i = 0; i < open.length; i++) {
-      for (let j = i + 1; j < open.length; j++) {
-        const d = Math.hypot(open[i].x - open[j].x, open[i].z - open[j].z);
-        expect(d).toBeGreaterThan(140);
+describe('红绿灯相位', () => {
+  it('同一路口两个轴向不会同时绿灯', () => {
+    for (let t = 0; t < CYCLE * 2; t += 0.25) {
+      for (const [ix, iz] of [[0, 0], [1, 0], [2, 3]] as const) {
+        const bothGreen = greenFor(true, ix, iz, t) && greenFor(false, ix, iz, t);
+        expect(bothGreen).toBe(false);
       }
     }
+  });
+
+  it('一个周期内两个轴向都有绿灯窗口', () => {
+    let zGreen = false;
+    let xGreen = false;
+    for (let t = 0; t < CYCLE; t += 0.25) {
+      zGreen = zGreen || greenFor(true, 0, 0, t);
+      xGreen = xGreen || greenFor(false, 0, 0, t);
+    }
+    expect(zGreen).toBe(true);
+    expect(xGreen).toBe(true);
+  });
+
+  it('受控路口全部在城区陆地上', () => {
+    const inters = listIntersections();
+    expect(inters.length).toBeGreaterThan(50);
+    for (const { ix, iz } of inters) {
+      expect(ix * 480).toBeGreaterThanOrEqual(-2050);
+      expect(Math.hypot(ix * 480, iz * 480)).toBeLessThanOrEqual(3200);
+    }
+  });
+});
+
+describe('Kabuki 市场布局', () => {
+  const layout = buildKabukiLayout();
+
+  it('摊位排与巷道都在市场范围内', () => {
+    for (const r of layout.rows) {
+      expect(Math.abs(r.x - MARKET_CENTER.x)).toBeLessThanOrEqual(MARKET_HALF);
+      expect(r.z0).toBeGreaterThanOrEqual(MARKET_CENTER.z - MARKET_HALF);
+      expect(r.z1).toBeLessThanOrEqual(MARKET_CENTER.z + MARKET_HALF);
+    }
+  });
+
+  it('巷道宽度为窄巷尺度（3~5m）', () => {
+    expect(ALLEY_W).toBeGreaterThanOrEqual(3);
+    expect(ALLEY_W).toBeLessThanOrEqual(5);
+  });
+
+  it('巷道数量与人流配置齐全', () => {
+    expect(layout.lanes.length).toBeGreaterThan(10);
+    for (const lane of layout.lanes) expect(lane.count).toBeGreaterThan(0);
   });
 });

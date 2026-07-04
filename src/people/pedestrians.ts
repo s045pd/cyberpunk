@@ -22,7 +22,6 @@ export function buildSidewalkPaths(): THREE.LineCurve3[] {
     const half = Math.sqrt(
       CITY_RADIUS * CITY_RADIUS - (Math.abs(c) + SIDEWALK_OFFSET) ** 2,
     );
-    // 沿 z 的人行道（路两侧）—— 西侧水域中的纵路直接跳过
     if (c > westLimit) {
       for (const side of [-1, 1]) {
         paths.push(new THREE.LineCurve3(
@@ -31,7 +30,6 @@ export function buildSidewalkPaths(): THREE.LineCurve3[] {
         ));
       }
     }
-    // 沿 x 的人行道 —— 西端截断到岸线以东
     const x0 = Math.max(-half, westLimit);
     if (x0 < half - 50) {
       for (const side of [-1, 1]) {
@@ -66,7 +64,6 @@ interface HumanOpts {
   hairLen: number;   // 后垂发长（0 = 短发帽盖）
   cap?: boolean;     // 制服帽（用躯干色）
   cane?: boolean;    // 手杖
-  visor?: boolean;   // 面部发光义眼条
   badge?: boolean;   // 胸前发光徽章
 }
 
@@ -75,26 +72,23 @@ function buildHumanGeometry(o: HumanOpts): THREE.BufferGeometry {
   const hipY = 0.52;
   const legW = o.shoulder * 0.32;
   parts.push(
-    partBox(o.shoulder, 0.34, 0.15, 0, hipY + 0.17, 0, 0),                 // 躯干
-    partBox(o.head, o.head, o.head, 0, 0.9, 0, 1),                          // 头
-    partBox(legW, hipY, legW * 1.1, -o.shoulder * 0.22, hipY / 2, 0, 2),    // 左腿
-    partBox(legW, hipY, legW * 1.1, o.shoulder * 0.22, hipY / 2, 0, 3),     // 右腿
-    partBox(0.05, 0.36, 0.06, -(o.shoulder / 2 + 0.035), 0.66, 0, 4),       // 左臂
-    partBox(0.05, 0.36, 0.06, o.shoulder / 2 + 0.035, 0.66, 0, 5),          // 右臂
+    partBox(o.shoulder, 0.34, 0.15, 0, hipY + 0.17, 0, 0),
+    partBox(o.head, o.head, o.head, 0, 0.9, 0, 1),
+    partBox(legW, hipY, legW * 1.1, -o.shoulder * 0.22, hipY / 2, 0, 2),
+    partBox(legW, hipY, legW * 1.1, o.shoulder * 0.22, hipY / 2, 0, 3),
+    partBox(0.05, 0.36, 0.06, -(o.shoulder / 2 + 0.035), 0.66, 0, 4),
+    partBox(0.05, 0.36, 0.06, o.shoulder / 2 + 0.035, 0.66, 0, 5),
   );
   if (o.hairLen > 0) {
     parts.push(partBox(o.head * 1.08, o.hairLen, o.head * 0.5,
       0, 0.9 + o.head / 2 - o.hairLen / 2, -o.head * 0.42, 8));
   } else {
     parts.push(partBox(o.head * 1.06, 0.035, o.head * 1.06,
-      0, 0.9 + o.head / 2 + 0.017, 0, o.cap ? 0 : 8));                      // 短发盖/制服帽
+      0, 0.9 + o.head / 2 + 0.017, 0, o.cap ? 0 : 8));
   }
   if (o.cap) {
     parts.push(partBox(o.head * 1.1, 0.02, o.head * 0.5,
-      0, 0.9 + o.head / 2, o.head * 0.55, 0));                              // 帽檐
-  }
-  if (o.visor) {
-    parts.push(partBox(o.head * 0.9, 0.025, 0.015, 0, 0.91, o.head / 2 + 0.008, 6));
+      0, 0.9 + o.head / 2, o.head * 0.55, 0));
   }
   if (o.badge) {
     parts.push(partBox(0.06, 0.05, 0.015, -o.shoulder * 0.22, 0.74, 0.083, 6));
@@ -119,7 +113,7 @@ interface KindProfile {
   heights: [number, number];
   speed: [number, number];
   swing: number;
-  clothes?: number[]; // 固定制服色板
+  clothes?: number[];
   accent?: number[];
 }
 
@@ -148,17 +142,19 @@ const CLOTHES = [
 ];
 const SKINS = [0xc9a284, 0xa8785a, 0x8a5a3c, 0x6b4530, 0xd9b294];
 const NEON = [0x00e5ff, 0xff2975, 0xb96bff, 0x00ffd5, 0xffe600];
+// 右侧通行车道（相对行进方向向右偏移）——对向人流天然分离，实现避让
+const LANE_SLOTS = [0.35, 0.75, 1.15, 1.55];
 
-/* ---------- 步态动画 shader ---------- */
+/* ---------- GPU 步行 shader：位置沿直线路径推进，CPU 零开销 ---------- */
 
 const VERT = /* glsl */ `
 attribute float aPart;
 attribute vec3 aClothes;
 attribute vec3 aSkin;
 attribute vec3 aAccent;
-attribute float aSeed;
-attribute float aGait;
-attribute float aSwing;
+attribute vec3 aAnim;      // (seed, 步频/米, 摆幅)，步频 0 = 静止
+attribute vec4 aPath;      // (起点 x, 起点 z, 方向 x, 方向 z)
+attribute vec4 aMove;      // (路径长, 初始里程, 米/秒, 右侧偏移)
 uniform float uTime;
 varying float vPart;
 varying vec3 vClothes;
@@ -174,21 +170,27 @@ void main() {
   vAccent = aAccent;
   vNormal = normalize(mat3(instanceMatrix) * normal);
 
+  float walked = aMove.y + aMove.z * uTime;
+  float d = mod(walked, max(aMove.x, 1.0));
+  vec2 base = aPath.xy + aPath.zw * d + vec2(aPath.w, -aPath.z) * aMove.w;
+
   vec3 p = position;
-  float ph = uTime * aGait + aSeed * 17.0;
-  float s = sin(ph) * aSwing;
+  float ph = walked * aAnim.y + aAnim.x * 17.0;
+  float s = sin(ph) * aAnim.z;
   if (aPart > 1.5 && aPart < 2.5) {
-    p.z += max(0.52 - p.y, 0.0) * 1.9 * s;          // 左腿
+    p.z += max(0.52 - p.y, 0.0) * 1.9 * s;
   } else if (aPart > 2.5 && aPart < 3.5) {
-    p.z -= max(0.52 - p.y, 0.0) * 1.9 * s;          // 右腿
+    p.z -= max(0.52 - p.y, 0.0) * 1.9 * s;
   } else if (aPart > 3.5 && aPart < 4.5) {
-    p.z -= max(0.82 - p.y, 0.0) * 1.1 * s;          // 左臂反摆
+    p.z -= max(0.82 - p.y, 0.0) * 1.1 * s;
   } else if (aPart > 4.5 && aPart < 5.5) {
-    p.z += max(0.82 - p.y, 0.0) * 1.1 * s;          // 右臂
+    p.z += max(0.82 - p.y, 0.0) * 1.1 * s;
   }
-  p.y += abs(sin(ph)) * 0.015 * step(0.01, aGait);  // 步行起伏
 
   vec4 world = instanceMatrix * vec4(p, 1.0);
+  world.x += base.x;
+  world.z += base.y;
+  world.y += abs(sin(ph)) * 0.02 * step(0.01, aAnim.y);
   vec4 view = viewMatrix * world;
   vDist = -view.z;
   gl_Position = projectionMatrix * view;
@@ -209,15 +211,14 @@ void main() {
   vec3 n = normalize(vNormal);
   float lit = 0.5 + 0.4 * max(n.y, 0.0);
   vec3 col;
-  if (vPart < 0.5) col = vClothes * lit;                     // 躯干/制服帽
-  else if (vPart < 1.5) col = vSkin * lit;                   // 头
-  else if (vPart < 3.5) col = vClothes * 0.55 * lit;         // 腿（裤色）
-  else if (vPart < 5.5) col = vClothes * 0.85 * lit;         // 臂
-  else if (vPart < 6.5) col = vAccent * 1.9;                 // 发光饰件
-  else if (vPart < 7.5) col = vec3(0.22, 0.22, 0.24) * lit;  // 手杖
-  else col = vec3(0.05, 0.045, 0.04) + vSkin * 0.08;         // 头发
+  if (vPart < 0.5) col = vClothes * lit;
+  else if (vPart < 1.5) col = vSkin * lit;
+  else if (vPart < 3.5) col = vClothes * 0.55 * lit;
+  else if (vPart < 5.5) col = vClothes * 0.85 * lit;
+  else if (vPart < 6.5) col = vAccent * 1.9;
+  else if (vPart < 7.5) col = vec3(0.22, 0.22, 0.24) * lit;
+  else col = vec3(0.05, 0.045, 0.04) + vSkin * 0.08;
 
-  // 街道光晕染
   col += vec3(0.4, 0.25, 0.1) * 0.08;
 
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * vDist * vDist);
@@ -236,19 +237,15 @@ export interface StaticPed {
   lying?: boolean;
 }
 
-export interface PedFleetOptions {
-  paths: THREE.Curve<THREE.Vector3>[];
-  countPerPath: number;
-  seed: number;
-  statics?: StaticPed[];
+export interface PedLane {
+  curve: THREE.LineCurve3;
+  count: number;
 }
 
-interface Walker {
-  pathIdx: number;
-  t: number;
-  speed: number;   // 参数比例/秒（含方向）
-  lateral: number;
-  height: number;
+export interface PedFleetOptions {
+  lanes: PedLane[];
+  seed: number;
+  statics?: StaticPed[];
 }
 
 const KIND_ORDER: PedKind[] = ['man', 'woman', 'elder', 'kid', 'cop', 'medic', 'vendor'];
@@ -256,14 +253,26 @@ const KIND_ORDER: PedKind[] = ['man', 'woman', 'elder', 'kid', 'cop', 'medic', '
 const WALKER_WEIGHTS: Array<[PedKind, number]> = [
   ['man', 0.34], ['woman', 0.32], ['elder', 0.13], ['kid', 0.13], ['cop', 0.08],
 ];
-const SAMPLES = 256;
+
+interface PedEntry {
+  height: number;
+  static_?: StaticPed;
+  walker?: {
+    start: THREE.Vector3;
+    dir: THREE.Vector2;
+    len: number;
+    t0: number;
+    speed: number;
+    lateral: number;
+    yaw: number;
+  };
+}
 
 export class PedFleet {
   group = new THREE.Group();
   meshes: THREE.InstancedMesh[] = [];
-  private walkers: Walker[][] = [];
+  private staticCounts: number[] = [];
   private walkerCounts: number[] = [];
-  private samples: THREE.Vector3[][] = [];
   private material: THREE.ShaderMaterial;
 
   constructor(opts: PedFleetOptions) {
@@ -278,10 +287,17 @@ export class PedFleet {
       },
     });
 
-    const buckets = new Map<PedKind, Array<{
-      walker?: Walker; static_?: StaticPed; height: number;
-    }>>();
+    // 静态人员排在桶前部（setDensity 截尾只隐藏行走者）
+    const buckets = new Map<PedKind, PedEntry[]>();
     KIND_ORDER.forEach((k) => buckets.set(k, []));
+
+    for (const s of opts.statics ?? []) {
+      const prof = PROFILES[s.kind];
+      buckets.get(s.kind)!.push({
+        static_: s,
+        height: range(rng, prof.heights[0], prof.heights[1]),
+      });
+    }
 
     const pickWalkerKind = (): PedKind => {
       let r = rng();
@@ -292,31 +308,34 @@ export class PedFleet {
       return 'man';
     };
 
-    opts.paths.forEach((path, pathIdx) => {
-      this.samples.push(path.getSpacedPoints(SAMPLES));
-      const length = Math.max(path.getLength(), 1);
-      for (let i = 0; i < opts.countPerPath; i++) {
+    const p0 = new THREE.Vector3();
+    const p1 = new THREE.Vector3();
+    for (const lane of opts.lanes) {
+      lane.curve.getPoint(0, p0);
+      lane.curve.getPoint(1, p1);
+      const len = p0.distanceTo(p1);
+      for (let i = 0; i < lane.count; i++) {
         const kind = pickWalkerKind();
         const prof = PROFILES[kind];
-        const dir = rng() < 0.5 ? 1 : -1;
+        const reverse = rng() < 0.5;
+        const dir = new THREE.Vector2(
+          (p1.x - p0.x) / len, (p1.z - p0.z) / len,
+        );
+        if (reverse) dir.multiplyScalar(-1);
+        const start = reverse ? p1.clone() : p0.clone();
         buckets.get(kind)!.push({
           height: range(rng, prof.heights[0], prof.heights[1]),
           walker: {
-            pathIdx,
-            t: rng(),
-            speed: (range(rng, prof.speed[0], prof.speed[1]) / length) * dir,
-            lateral: range(rng, -1.2, 1.2),
-            height: 0,
+            start,
+            dir,
+            len,
+            t0: rng() * len,
+            speed: range(rng, prof.speed[0], prof.speed[1]),
+            lateral: pick(rng, LANE_SLOTS) + range(rng, -0.12, 0.12),
+            yaw: Math.atan2(dir.x, dir.y),
           },
         });
       }
-    });
-    for (const s of opts.statics ?? []) {
-      const prof = PROFILES[s.kind];
-      buckets.get(s.kind)!.push({
-        static_: s,
-        height: range(rng, prof.heights[0], prof.heights[1]),
-      });
     }
 
     const clothes = new THREE.Color();
@@ -341,15 +360,16 @@ export class PedFleet {
       const aClothes = new Float32Array(n * 3);
       const aSkin = new Float32Array(n * 3);
       const aAccent = new Float32Array(n * 3);
-      const aSeed = new Float32Array(n);
-      const aGait = new Float32Array(n);
-      const aSwing = new Float32Array(n);
-      const walkers: Walker[] = [];
+      const aAnim = new Float32Array(n * 3);
+      const aPath = new Float32Array(n * 4);
+      const aMove = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) aMove[i * 4] = 1; // len 默认 1
+      let statics = 0;
+      let walkers = 0;
 
       list.forEach((entry, i) => {
         clothes.setHex(prof.clothes ? pick(rng, prof.clothes) : pick(rng, CLOTHES));
         skin.setHex(pick(rng, SKINS));
-        // 平民约 1/4 带霓虹饰件；制服类固定
         const accentHex = prof.accent
           ? pick(rng, prof.accent)
           : (rng() < 0.25 ? pick(rng, NEON) : 0x000000);
@@ -357,98 +377,54 @@ export class PedFleet {
         aClothes.set([clothes.r, clothes.g, clothes.b], i * 3);
         aSkin.set([skin.r, skin.g, skin.b], i * 3);
         aAccent.set([accent.r, accent.g, accent.b], i * 3);
-        aSeed[i] = range(rng, 0, 100);
-        aSwing[i] = prof.swing;
+        aAnim.set([range(rng, 0, 100), 0, prof.swing], i * 3);
 
         if (entry.walker) {
-          entry.walker.height = entry.height;
-          const stepRate = 5.2 / entry.height; // 个子越小步频越高
-          aGait[i] = Math.abs(entry.walker.speed) > 1e-9 ? stepRate : 0;
-          walkers.push(entry.walker);
+          const w = entry.walker;
+          aAnim[i * 3 + 1] = 7.4 / entry.height;   // 步频随身高
+          aPath.set([w.start.x, w.start.z, w.dir.x, w.dir.y], i * 4);
+          aMove.set([w.len, w.t0, w.speed, w.lateral], i * 4);
+          pos.set(0, 0, 0);
+          euler.set(0, w.yaw, 0);
+          walkers++;
         } else {
-          aGait[i] = 0;
           const s = entry.static_!;
           pos.set(s.x, s.lying ? 0.14 : 0, s.z);
           if (s.lying) euler.set(-Math.PI / 2, 0, s.yaw);
           else euler.set(0, s.yaw, 0);
-          quat.setFromEuler(euler);
-          scl.setScalar(entry.height);
-          m.compose(pos, quat, scl);
-          mesh.setMatrixAt(i, m);
+          statics++;
         }
+        quat.setFromEuler(euler);
+        scl.setScalar(entry.height);
+        m.compose(pos, quat, scl);
+        mesh.setMatrixAt(i, m);
       });
-      // 行走者排在桶前部（构造顺序保证），静态在尾部一次性写入
-      this.walkers.push(walkers);
-      this.walkerCounts.push(walkers.length);
 
       const geo = mesh.geometry;
       geo.setAttribute('aClothes', new THREE.InstancedBufferAttribute(aClothes, 3));
       geo.setAttribute('aSkin', new THREE.InstancedBufferAttribute(aSkin, 3));
       geo.setAttribute('aAccent', new THREE.InstancedBufferAttribute(aAccent, 3));
-      geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(aSeed, 1));
-      geo.setAttribute('aGait', new THREE.InstancedBufferAttribute(aGait, 1));
-      geo.setAttribute('aSwing', new THREE.InstancedBufferAttribute(aSwing, 1));
+      geo.setAttribute('aAnim', new THREE.InstancedBufferAttribute(aAnim, 3));
+      geo.setAttribute('aPath', new THREE.InstancedBufferAttribute(aPath, 4));
+      geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(aMove, 4));
       mesh.instanceMatrix.needsUpdate = true;
+      this.staticCounts.push(statics);
+      this.walkerCounts.push(walkers);
       this.meshes.push(mesh);
       this.group.add(mesh);
     });
-    this.update(0, 0);
   }
 
-  /** 质量降档：按比例隐藏行走者（静态场景人员保留在尾部不受影响） */
+  /** 质量降档：截尾隐藏行走者，静态场景人员保留（在桶前部） */
   setDensity(fraction: number): void {
-    const hide = new THREE.Matrix4().makeTranslation(0, -500, 0);
     this.meshes.forEach((mesh, k) => {
-      const target = Math.floor(this.walkerCounts[k] * fraction);
-      const prev = this.visibleWalkers[k] ?? this.walkerCounts[k];
-      for (let i = target; i < prev; i++) mesh.setMatrixAt(i, hide);
-      if (target < prev) mesh.instanceMatrix.needsUpdate = true;
-      this.visibleWalkers[k] = target;
+      mesh.count = this.staticCounts[k]
+        + Math.floor(this.walkerCounts[k] * fraction);
     });
   }
 
-  private visibleWalkers: number[] = [];
-
-  private pos = new THREE.Vector3();
-  private quat = new THREE.Quaternion();
-  private scl = new THREE.Vector3();
-  private m = new THREE.Matrix4();
-  private ahead = new THREE.Vector3();
-
-  update(dt: number, t: number): void {
+  /** 位移在 GPU：每帧仅推进时间 uniform */
+  update(_dt: number, t: number): void {
     this.material.uniforms.uTime.value = t;
-    const EPS = 2 / SAMPLES;
-    this.meshes.forEach((mesh, k) => {
-      const walkers = this.walkers[k];
-      const visible = this.visibleWalkers[k] ?? walkers.length;
-      for (let i = 0; i < Math.min(visible, walkers.length); i++) {
-        const w = walkers[i];
-        w.t = ((w.t + w.speed * dt) % 1 + 1) % 1;
-        const pts = this.samples[w.pathIdx];
-        sampleAt(pts, w.t, this.pos);
-        sampleAt(pts, ((w.t + EPS * Math.sign(w.speed || 1)) % 1 + 1) % 1, this.ahead);
-        const dx = this.ahead.x - this.pos.x;
-        const dz = this.ahead.z - this.pos.z;
-        const yaw = Math.atan2(dx, dz);
-        const len = Math.hypot(dx, dz) || 1;
-        this.pos.x += (dz / len) * w.lateral;
-        this.pos.z += (-dx / len) * w.lateral;
-        this.quat.setFromAxisAngle(UP, yaw);
-        this.scl.setScalar(w.height);
-        this.m.compose(this.pos, this.quat, this.scl);
-        mesh.setMatrixAt(i, this.m);
-      }
-      mesh.instanceMatrix.needsUpdate = true;
-    });
   }
-}
-
-const UP = new THREE.Vector3(0, 1, 0);
-const tmpA = new THREE.Vector3();
-function sampleAt(pts: THREE.Vector3[], t: number, out: THREE.Vector3): THREE.Vector3 {
-  const f = t * (pts.length - 1);
-  const i = Math.floor(f);
-  const k = f - i;
-  tmpA.copy(pts[Math.min(i + 1, pts.length - 1)]);
-  return out.copy(pts[i]).lerp(tmpA, k);
 }

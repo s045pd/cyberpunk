@@ -52,6 +52,7 @@ export function createGroundTraffic(seed: number): VehicleFleet {
     count: 40,
     speedRange: [9, 20],       // 米/秒，市区速度
     yOffset: -ROAD_Y + 0.05,   // 曲线在 y=3，车轮贴回路面
+    signalized: true,          // 受路口红绿灯控制
   }));
   return new VehicleFleet({
     lanes,
