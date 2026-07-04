@@ -5,14 +5,14 @@ import { LANDMARK_CLEARINGS } from './anchors';
 import { createRng, range } from '../core/rng';
 
 export const ROAD_SPACING = 480;
-export const ROAD_HALF_WIDTH = 26;
+export const ROAD_HALF_WIDTH = 14;
 
 export interface Plot {
   x: number; z: number;   // 中心（世界坐标）
   sx: number; sz: number; // 底面尺寸
   h: number;              // 楼高
   district: DistrictId;
-  kind: number;           // 建筑形体 0..4
+  kind: number;           // 建筑形体 0..7
   litRate: number;        // 该楼窗亮率
 }
 
@@ -40,6 +40,24 @@ function hashId(id: string): number {
   return h >>> 0;
 }
 
+/** 平滑值噪声：让楼高成片聚集（高层区/低层区），而非纯随机撒点 */
+function valueNoise(x: number, z: number, seed: number): number {
+  const xi = Math.floor(x);
+  const zi = Math.floor(z);
+  const xf = x - xi;
+  const zf = z - zi;
+  const s = (a: number, b: number) => {
+    let h = (Math.imul(a, 374761393) + Math.imul(b, 668265263)) ^ seed;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  const u = xf * xf * (3 - 2 * xf);
+  const v = zf * zf * (3 - 2 * zf);
+  const a = s(xi, zi) * (1 - u) + s(xi + 1, zi) * u;
+  const b = s(xi, zi + 1) * (1 - u) + s(xi + 1, zi + 1) * u;
+  return a * (1 - v) + b * v;
+}
+
 export function generatePlots(seed: number): Plot[] {
   const plots: Plot[] = [];
   for (const d of DISTRICTS) {
@@ -59,10 +77,12 @@ export function generatePlots(seed: number): Plot[] {
     for (let gx = x0; gx < x1; gx += s.cellSize) {
       for (let gz = z0; gz < z1; gz += s.cellSize) {
         if (rng() > s.density) continue;
-        const x = gx + range(rng, 0.25, 0.75) * s.cellSize;
-        const z = gz + range(rng, 0.25, 0.75) * s.cellSize;
+        // 楼体贴格排列，仅少量抖动 —— 形成墙贴墙的实心街区
+        const x = gx + s.cellSize * (0.5 + range(rng, -0.06, 0.06));
+        const z = gz + s.cellSize * (0.5 + range(rng, -0.06, 0.06));
 
-        const margin = ROAD_HALF_WIDTH + s.cellSize * 0.3;
+        // 楼皮不许伸进道路
+        const margin = ROAD_HALF_WIDTH + s.cellSize * 0.5;
         if (distToRoad(x) < margin || distToRoad(z) < margin) continue;
 
         const nx = x / CITY_SIZE + 0.5;
@@ -71,18 +91,21 @@ export function generatePlots(seed: number): Plot[] {
         if (inClearing(x, z)) continue;
 
         const [hLo, hHi] = s.heightRange;
-        let h = hLo + (hHi - hLo) * Math.pow(rng(), s.heightBias);
-        if (d.id === 'city-center' && rng() < 0.05) {
-          h = Math.min(h * 1.8, 460); // 少量超高层
+        // 基础高度 × 聚集噪声：高层成簇、低层成片
+        const cluster = 0.55 + valueNoise(x / 540, z / 540, seed) * 1.1;
+        let h = hLo + (hHi - hLo) * Math.pow(rng(), s.heightBias) * cluster;
+        h = Math.min(Math.max(h, hLo), hHi);
+        if (d.id === 'city-center' && rng() < 0.06) {
+          h = Math.min(h * 2.0, 460); // 少量超高层
         }
 
         plots.push({
           x, z,
-          sx: s.cellSize * range(rng, 0.42, 0.68),
-          sz: s.cellSize * range(rng, 0.42, 0.68),
+          sx: s.cellSize * range(rng, 0.86, 0.98),
+          sz: s.cellSize * range(rng, 0.86, 0.98),
           h,
           district: d.id,
-          kind: Math.floor(rng() * 5),
+          kind: Math.floor(rng() * 8),
           litRate: Math.min(1, s.windowLitRate * range(rng, 0.7, 1.25)),
         });
       }

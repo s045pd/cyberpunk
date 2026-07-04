@@ -19,15 +19,32 @@ function glowBand(w: number, d: number, y: number, color: number): THREE.Mesh {
   return m;
 }
 
-/** 荒坂塔：三段收分阶梯体量 + 红色警示光带，全城制高点 */
+/** 竖向红色光缝（企业塔立面的警示灯槽） */
+function seam(h: number, y: number, x: number, z: number): THREE.Mesh {
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x000000, emissive: 0xff2020, emissiveIntensity: 2.2,
+  });
+  const m = new THREE.Mesh(new THREE.BoxGeometry(2.4, h, 2.4), mat);
+  m.position.set(x, y + h / 2, z);
+  return m;
+}
+
+/** 荒坂塔：四段收分金字塔轮廓 + 红色光带/竖缝，全城制高点（~700m） */
 export function createArasakaTower(): THREE.Group {
   const g = new THREE.Group();
-  g.add(slab(220, 220, 180, 0));
-  g.add(slab(160, 180, 130, 220));
-  g.add(slab(100, 140, 80, 400));
-  g.add(glowBand(224, 184, 218, 0xff2020));
-  g.add(glowBand(164, 134, 398, 0xff2020));
-  g.add(glowBand(104, 84, 538, 0xff2020));
+  g.add(slab(260, 240, 210, 0));
+  g.add(slab(200, 200, 160, 240));
+  g.add(slab(140, 160, 110, 440));
+  g.add(slab(70, 90, 55, 600));
+  g.add(glowBand(264, 214, 238, 0xff2020));
+  g.add(glowBand(204, 164, 438, 0xff2020));
+  g.add(glowBand(144, 114, 598, 0xff2020));
+  g.add(glowBand(74, 59, 688, 0xff2020));
+  // 中段四条竖向红缝
+  g.add(seam(190, 245, 101.5, 0));
+  g.add(seam(190, 245, -101.5, 0));
+  g.add(seam(190, 245, 0, 81.5));
+  g.add(seam(190, 245, 0, -81.5));
   // 顶部信标
   const beacon = new THREE.Mesh(
     new THREE.BoxGeometry(14, 30, 14),
@@ -35,7 +52,7 @@ export function createArasakaTower(): THREE.Group {
       color: 0x000000, emissive: 0xff3030, emissiveIntensity: 4,
     }),
   );
-  beacon.position.y = 555;
+  beacon.position.y = 705;
   g.add(beacon);
   return g;
 }
