@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ColliderGrid } from '../core/collision';
 
 const EYE_HEIGHT = 1.7;
 const WALK_SPEED = 7;
@@ -6,6 +7,11 @@ const SPRINT_MULT = 2.2;
 
 export class WalkControls {
   enabled = false;
+  private colliders: ColliderGrid | null = null;
+
+  setColliders(grid: ColliderGrid): void {
+    this.colliders = grid;
+  }
   private yaw = 0;
   private pitch = 0;
   private keys = new Set<string>();
@@ -50,6 +56,11 @@ export class WalkControls {
     const p = this.camera.position;
     p.add(dir);
     p.y = EYE_HEIGHT;
+    if (this.colliders) {
+      const [rx, rz] = this.colliders.resolve(p.x, p.z, 0.45);
+      p.x = rx;
+      p.z = rz;
+    }
     const r = Math.hypot(p.x, p.z);
     if (r > 5600) {
       const k = 5600 / r;

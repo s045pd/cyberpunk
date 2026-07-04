@@ -10,7 +10,7 @@ const CITY_RADIUS = 3400;
  * 烘焙"街区霓虹倒影"贴图：每个区域按自己的霓虹色板撒柔光斑，
  * 采样后叠在湿沥青上 —— 雨夜街道反光的廉价近似。
  */
-function bakeCityGlow(seed: number): THREE.CanvasTexture {
+export function bakeCityGlow(seed: number): THREE.CanvasTexture {
   const N = 1024;
   const canvas = document.createElement('canvas');
   canvas.width = N;
@@ -107,14 +107,14 @@ void main() {
 }
 `;
 
-export function createGround(seed: number): THREE.Mesh {
+export function createGround(seed: number, glow?: THREE.Texture): THREE.Mesh {
   const mat = new THREE.ShaderMaterial({
     vertexShader: VERT,
     fragmentShader: FRAG,
     uniforms: {
       uFogColor: { value: new THREE.Color(FOG_COLOR) },
       uFogDensity: { value: FOG_DENSITY },
-      uGlow: { value: bakeCityGlow(seed) },
+      uGlow: { value: glow ?? bakeCityGlow(seed) },
     },
   });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(24000, 24000), mat);
@@ -134,8 +134,8 @@ export function createStreetLamps(): THREE.Points {
     const half = Math.sqrt(CITY_RADIUS * CITY_RADIUS - c * c);
     for (let v = -half; v <= half; v += STEP) {
       const side = (Math.round(v / STEP) % 2 === 0) ? OFFSET : -OFFSET;
-      positions.push(c + side, 8.5, v);   // 沿 z 的路
-      positions.push(v, 8.5, c - side);   // 沿 x 的路
+      if (c > -2050) positions.push(c + side, 8.5, v);  // 纵路灯（水域中跳过）
+      if (v > -2050) positions.push(v, 8.5, c - side);  // 横路灯（西端截断）
     }
   }
   const geo = new THREE.BufferGeometry();

@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createRng, range, pick, Rng } from '../core/rng';
 import { FOG_COLOR, FOG_DENSITY } from '../core/engine';
 
-export type VehicleKind = 'sedan' | 'van' | 'sport' | 'av';
+export type VehicleKind = 'sedan' | 'van' | 'sport' | 'av' | 'police' | 'medevac';
 
 export interface LaneDef {
   curve: THREE.Curve<THREE.Vector3>;
@@ -21,13 +21,15 @@ export interface LaneDef {
 export interface FleetOptions {
   lanes: LaneDef[];
   kinds: VehicleKind[];
+  /** 与 kinds 对应的抽取权重（缺省均匀） */
+  kindWeights?: number[];
   seed: number;
   /** 悬浮起伏幅度（AV 用，米） */
   bob?: number;
 }
 
 /* ---------- 车体几何：分区发光（aPart 顶点属性） ---------- */
-// 0 车身 / 1 车头灯 / 2 车尾灯 / 3 玻璃 / 4 氛围底光 / 5 推进器 / 6 警示闪灯
+// 0 车身 / 1 车头灯 / 2 车尾灯 / 3 玻璃 / 4 氛围底光 / 5 推进器 / 6 警示闪灯 / 7 警灯条
 
 function partBox(
   w: number, h: number, d: number,
@@ -42,7 +44,7 @@ function partBox(
 }
 
 /** 车头朝 +z；底部贴 y=0 */
-function buildVehicleGeometry(kind: VehicleKind): THREE.BufferGeometry {
+export function buildVehicleGeometry(kind: VehicleKind): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   switch (kind) {
     case 'van':
@@ -62,6 +64,30 @@ function buildVehicleGeometry(kind: VehicleKind): THREE.BufferGeometry {
         partBox(0.42, 0.14, 0.12, 0.72, 0.55, 2.2, 1),
         partBox(1.9, 0.14, 0.1, 0, 0.62, -2.22, 2),      // 贯穿尾灯
         partBox(1.9, 0.06, 3.9, 0, 0.2, 0, 4),           // 氛围底光
+      );
+      break;
+    case 'police':
+      parts.push(
+        partBox(2.0, 0.85, 4.6, 0, 0.72, 0, 0),
+        partBox(1.8, 0.62, 2.3, 0, 1.45, -0.35, 3),
+        partBox(0.45, 0.18, 0.12, -0.68, 0.75, 2.32, 1),
+        partBox(0.45, 0.18, 0.12, 0.68, 0.75, 2.32, 1),
+        partBox(1.6, 0.16, 0.1, 0, 0.8, -2.32, 2),
+        partBox(1.5, 0.16, 0.55, 0, 1.85, -0.35, 7),   // 车顶警灯条
+      );
+      break;
+    case 'medevac':
+      parts.push(
+        partBox(3.2, 1.5, 7.2, 0, 1.3, 0, 0),           // 主舱（白）
+        partBox(2.6, 0.9, 2.2, 0, 2.35, 1.7, 3),        // 座舱罩
+        partBox(0.9, 1.1, 2.2, -2.0, 1.2, -0.6, 0),     // 侧吊舱 ×2
+        partBox(0.9, 1.1, 2.2, 2.0, 1.2, -0.6, 0),
+        partBox(0.8, 0.12, 1.9, -2.0, 0.6, -0.6, 5),    // 推进器 ×2
+        partBox(0.8, 0.12, 1.9, 2.0, 0.6, -0.6, 5),
+        partBox(2.4, 0.22, 0.14, 0, 1.2, 3.62, 1),      // 前灯条
+        partBox(2.6, 0.22, 0.14, 0, 1.2, -3.62, 2),     // 尾灯条
+        partBox(0.2, 0.2, 0.2, 0, 2.9, -2.8, 6),        // 警示闪灯
+        partBox(2.1, 0.16, 0.9, 0, 2.15, -0.3, 7),      // 顶部医疗灯条
       );
       break;
     case 'av':
@@ -144,9 +170,14 @@ void main() {
   } else if (vPart < 5.5) {
     float pulse = 1.5 + 0.5 * sin(uTime * 26.0 + vSeed * 20.0);
     col = vAccent * pulse;                         // 推进器
-  } else {
+  } else if (vPart < 6.5) {
     float blink = step(0.62, fract(uTime * 1.1 + vSeed));
     col = vec3(2.2, 0.15, 0.12) * blink;           // 警示闪灯
+  } else {
+    // 警灯条：红蓝交替 + 爆闪
+    float alt = step(0.5, fract(uTime * 2.3 + vSeed));
+    float strobe = step(0.3, fract(uTime * 5.1 + vSeed * 3.0));
+    col = mix(vec3(2.6, 0.08, 0.08), vec3(0.15, 0.35, 2.8), alt) * strobe;
   }
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * vDist * vDist);
   col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
@@ -161,6 +192,7 @@ const BODY_PALETTE = [
   0x5a1616, 0x143a4a, 0x2c2436, 0xb8901e, // 最后一个是出租车黄
 ];
 const ACCENT_PALETTE = [0x00e5ff, 0xff2975, 0xb96bff, 0x00ffd5, 0xff6a00];
+export const POLICE_PALETTE = [0xd8dade, 0x14161a];
 const SAMPLES = 512;
 
 interface Vehicle {
@@ -170,6 +202,18 @@ interface Vehicle {
   lateral: number;
   yOffset: number;
   bobPhase: number;
+}
+
+export function createVehicleMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    vertexShader: VERT,
+    fragmentShader: FRAG,
+    uniforms: {
+      uTime: { value: 0 },
+      uFogColor: { value: new THREE.Color(FOG_COLOR) },
+      uFogDensity: { value: FOG_DENSITY },
+    },
+  });
 }
 
 export class VehicleFleet {
@@ -185,15 +229,7 @@ export class VehicleFleet {
     const rng: Rng = createRng(opts.seed >>> 0);
     this.bob = opts.bob ?? 0;
 
-    this.material = new THREE.ShaderMaterial({
-      vertexShader: VERT,
-      fragmentShader: FRAG,
-      uniforms: {
-        uTime: { value: 0 },
-        uFogColor: { value: new THREE.Color(FOG_COLOR) },
-        uFogDensity: { value: FOG_DENSITY },
-      },
-    });
+    this.material = createVehicleMaterial();
 
     // 车辆生成并按车型分桶
     this.byKind = opts.kinds.map(() => []);
@@ -201,8 +237,15 @@ export class VehicleFleet {
       this.samples.push(lane.curve.getSpacedPoints(SAMPLES));
       const length = Math.max(lane.curve.getLength(), 1);
       const dir = lane.dir ?? 1;
+      const weights = opts.kindWeights ?? opts.kinds.map(() => 1);
+      const weightSum = weights.reduce((a, b) => a + b, 0);
       for (let i = 0; i < lane.count; i++) {
-        const kindIdx = Math.floor(rng() * opts.kinds.length);
+        let roll = rng() * weightSum;
+        let kindIdx = 0;
+        for (let w = 0; w < weights.length; w++) {
+          roll -= weights[w];
+          if (roll <= 0) { kindIdx = w; break; }
+        }
         this.byKind[kindIdx].push({
           laneIdx,
           t: rng(),
@@ -227,7 +270,11 @@ export class VehicleFleet {
       const aAccent = new Float32Array(n * 3);
       const aSeed = new Float32Array(n);
       for (let i = 0; i < list.length; i++) {
-        body.setHex(pick(rng, BODY_PALETTE));
+        body.setHex(pick(
+          rng,
+          kind === 'police' ? POLICE_PALETTE
+            : kind === 'medevac' ? [0xd9d6cd] : BODY_PALETTE,
+        ));
         aBody.set([body.r, body.g, body.b], i * 3);
         // 地面车约 1/4 有氛围底光；AV/跑车必亮
         const glowOn = kind === 'av' || kind === 'sport' || rng() < 0.25;
