@@ -73,4 +73,14 @@ export class ColliderGrid {
     }
     return [x, z];
   }
+
+  /** 点是否落在任一碰撞盒内（子弹遮挡用） */
+  blocked(x: number, z: number): boolean {
+    const cx = Math.floor(x / this.cellSize);
+    const cz = Math.floor(z / this.cellSize);
+    for (const b of this.cells.get(this.key(cx, cz)) ?? []) {
+      if (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ) return true;
+    }
+    return false;
+  }
 }
