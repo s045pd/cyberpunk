@@ -9,7 +9,10 @@ import { generatePlots } from './city/layout';
 import { createBuildings } from './city/buildings';
 import { createGround, createStreetLamps, bakeCityGlow } from './city/ground';
 import { createWater } from './city/water';
-import { partitionOpenPlots, createInteriors } from './city/interiors';
+import { createLobbies } from './city/lobbies';
+import { ElevatorSystem } from './city/elevator';
+import { createKabukiMarket } from './city/kabukiMarket';
+import { createTrafficLights } from './traffic/trafficLights';
 import { createVendors } from './city/vendors';
 import { PedFleet, buildSidewalkPaths } from './people/pedestrians';
 import { pickIncidentSites, createIncidents } from './events/incidents';
@@ -67,16 +70,15 @@ async function start(): Promise<void> {
 
   const plots = await boot.step('解析城区结构 // PARSING DISTRICTS', () =>
     generatePlots(SEED));
-  // 可进入建筑从实心楼群中分拣出来单独建壳
-  const { open, closed } = partitionOpenPlots(plots, SEED);
 
-  const interiors = await boot.step('浇筑楼群 // EXTRUDING BLOCKS', () => {
-    const buildings = createBuildings(closed, SEED);
+  // 全城楼体一层挑空 + 通用大堂壳：每栋楼都可进入
+  const lobbies = await boot.step('浇筑楼群 // EXTRUDING BLOCKS', () => {
+    const buildings = createBuildings(plots, SEED);
     engine.scene.add(buildings.group);
     updatables.push(buildings);
-    const inner = createInteriors(open, SEED);
-    engine.scene.add(inner.group);
-    return inner;
+    const lb = createLobbies(plots);
+    engine.scene.add(lb.group);
+    return lb;
   });
 
   const highway = await boot.step('铺设路网 // PAVING GRID', () => {
@@ -87,7 +89,10 @@ async function start(): Promise<void> {
     updatables.push(water);
     engine.scene.add(createStreetLamps());
     engine.scene.add(createLandmarks(SEED));
-    engine.scene.add(createBridges(closed, SEED));
+    engine.scene.add(createBridges(plots, SEED));
+    const lights = createTrafficLights();
+    engine.scene.add(lights.group);
+    updatables.push(lights);
     const hw = createHighway(SEED);
     engine.scene.add(hw.group);
     updatables.push({ update: (dt, t) => hw.update(dt, t) });
@@ -113,7 +118,7 @@ async function start(): Promise<void> {
     },
   );
 
-  const peds = await boot.step('注入生命 // SPAWNING LIFE', () => {
+  const { peds, kabuki } = await boot.step('注入生命 // SPAWNING LIFE', () => {
     const sites = pickIncidentSites(SEED);
     (window as unknown as Record<string, unknown>).__ncSites = sites;
     const incidents = createIncidents(sites, SEED);
@@ -121,20 +126,25 @@ async function start(): Promise<void> {
     updatables.push(incidents);
     const vendors = createVendors(SEED);
     engine.scene.add(vendors.group);
+    const market = createKabukiMarket(SEED);
+    engine.scene.add(market.group);
     const rescue = new RescueDirector(
       sites.filter((st) => st.kind === 'rescue'), SEED,
     );
     engine.scene.add(rescue.group);
     updatables.push({ update: (dt, t) => rescue.update(dt, t) });
+    // 人行道 ×10 密度 + Kabuki 巷道人流，位移全在 GPU
     const fleet = new PedFleet({
-      paths: buildSidewalkPaths(),
-      countPerPath: 55,
+      lanes: [
+        ...buildSidewalkPaths().map((curve) => ({ curve, count: 550 })),
+        ...market.lanes,
+      ],
       seed: SEED ^ 0x9ed,
-      statics: [...incidents.statics, ...vendors.statics],
+      statics: [...incidents.statics, ...vendors.statics, ...market.statics],
     });
     engine.scene.add(fleet.group);
     updatables.push({ update: (dt, t) => fleet.update(dt, t) });
-    return fleet;
+    return { peds: fleet, kabuki: market };
   });
 
   const { rain, lightning } = await boot.step('召唤雨云 // SEEDING RAIN', () => {
@@ -150,20 +160,20 @@ async function start(): Promise<void> {
 
   const fly = new FlyControls(engine.camera, canvas);
   const walk = new WalkControls(engine.camera, canvas);
-  // 漫游碰撞：实心楼群 + 大堂墙体/内饰
+  // 漫游碰撞：大堂墙体/电梯 + 市场摊位排（楼体一层挑空，门洞是入口）
   const colliderGrid = new ColliderGrid(64);
-  for (const pl of closed) {
-    if (pl.h < 3) continue;
-    colliderGrid.add({
-      minX: pl.x - pl.sx / 2, maxX: pl.x + pl.sx / 2,
-      minZ: pl.z - pl.sz / 2, maxZ: pl.z + pl.sz / 2,
-    });
-  }
-  for (const c of interiors.colliders) colliderGrid.add(c);
+  for (const c of lobbies.colliders) colliderGrid.add(c);
+  for (const c of kabuki.colliders) colliderGrid.add(c);
   walk.setColliders(colliderGrid);
   const modes = new ModeManager(engine.camera, fly, walk);
   const hud = new Hud(overlay);
   modes.onChange((m) => hud.setMode(m));
+  const elevator = new ElevatorSystem(lobbies.zones, walk, hud);
+  updatables.push({
+    update: (dt) => elevator.update(
+      dt, engine.camera.position.x, engine.camera.position.z,
+    ),
+  });
   updatables.push(
     { update: (dt) => fly.update(dt) },
     { update: (dt) => walk.update(dt) },

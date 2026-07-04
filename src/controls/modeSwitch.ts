@@ -44,6 +44,8 @@ export class ModeManager {
     this.from.copy(this.camera.position);
     if (this.mode === 'fly') {
       this.target = 'walk';
+      this.walk.baseY = 0;
+      this.walk.bounds = null;
       this.to.set(this.from.x, EYE_HEIGHT, this.from.z);
     } else {
       this.target = 'fly';

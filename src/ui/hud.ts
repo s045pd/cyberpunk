@@ -7,6 +7,7 @@ const SCRAMBLE = '█▓▒░<>/\\|=+*';
 
 export class Hud {
   private districtEl: HTMLDivElement;
+  private hintEl!: HTMLDivElement;
   private statsEl: HTMLDivElement;
   private keysEl: HTMLDivElement;
   private current = '';
@@ -24,11 +25,13 @@ export class Hud {
       <div class="hud-district"></div>
       <div class="hud-keys"></div>
       <div class="hud-stats"></div>
+      <div class="hud-hint"></div>
     `;
     overlay.appendChild(root);
     this.districtEl = root.querySelector<HTMLDivElement>('.hud-district')!;
     this.keysEl = root.querySelector<HTMLDivElement>('.hud-keys')!;
     this.statsEl = root.querySelector<HTMLDivElement>('.hud-stats')!;
+    this.hintEl = root.querySelector<HTMLDivElement>('.hud-hint')!;
     this.setMode('fly');
   }
 
@@ -36,6 +39,10 @@ export class Hud {
     this.keysEl.textContent = mode === 'fly'
       ? 'WASD 移动 · QE 升降 · SHIFT 加速 · F 降落 · 点击画面锁定视角'
       : 'WASD 行走 · SHIFT 疾跑 · F 起飞 · 点击画面锁定视角';
+  }
+
+  setHint(text: string): void {
+    if (this.hintEl.textContent !== text) this.hintEl.textContent = text;
   }
 
   setQualityName(name: string): void {

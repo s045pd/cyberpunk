@@ -7,6 +7,10 @@ const SPRINT_MULT = 2.2;
 
 export class WalkControls {
   enabled = false;
+  /** 脚下基准高度（0=地面，>0=电梯/天台） */
+  baseY = 0;
+  /** 限制活动范围（电梯轿厢/天台边界），null 时用碰撞网格 */
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null;
   private colliders: ColliderGrid | null = null;
 
   setColliders(grid: ColliderGrid): void {
@@ -55,8 +59,11 @@ export class WalkControls {
 
     const p = this.camera.position;
     p.add(dir);
-    p.y = EYE_HEIGHT;
-    if (this.colliders) {
+    p.y = this.baseY + EYE_HEIGHT;
+    if (this.bounds) {
+      p.x = Math.min(Math.max(p.x, this.bounds.minX), this.bounds.maxX);
+      p.z = Math.min(Math.max(p.z, this.bounds.minZ), this.bounds.maxZ);
+    } else if (this.colliders && this.baseY === 0) {
       const [rx, rz] = this.colliders.resolve(p.x, p.z, 0.45);
       p.x = rx;
       p.z = rz;

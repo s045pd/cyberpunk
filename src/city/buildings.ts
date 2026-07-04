@@ -27,7 +27,12 @@ varying float vTrim;
 varying float vDist;
 
 void main() {
-  vLocal = position * aScale;
+  // 一层挑空：楼体从大堂顶（4.2m）起浮，地面层由 lobbies.ts 的墙壳补上
+  vLocal = vec3(
+    position.x * aScale.x,
+    4.2 + position.y * max(aScale.y - 4.2, 1.0),
+    position.z * aScale.z
+  );
   vScale = aScale;
   vNormal = normal;
   vTint = aTint;

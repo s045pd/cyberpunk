@@ -11,6 +11,7 @@ export const LANDMARK_ANCHORS: LandmarkAnchor[] = [
   { id: 'corpo-twins', x: -1300, z: 240, r: 200 },    // 市中心 双塔
   { id: 'megabuilding-h10', x: 0, z: -2400, r: 240 }, // Watson H10
   { id: 'kabuki-dome', x: 960, z: -2800, r: 170 },    // Watson Kabuki 市场穹顶
+  { id: 'kabuki-market', x: 720, z: -2640, r: 112 },  // Kabuki 夜市巷道区
   { id: 'konpeki', x: 400, z: -640, r: 150 },         // 市中心边缘 Konpeki
   { id: 'pacifica-ruin', x: -800, z: 2000, r: 230 },  // Pacifica 烂尾大酒店
 ];
