@@ -10,6 +10,7 @@ import { createBuildings } from './city/buildings';
 import { createGround, createStreetLamps, bakeCityGlow } from './city/ground';
 import { createWater } from './city/water';
 import { createLobbies } from './city/lobbies';
+import { createInteriorKits } from './city/interiorKits';
 import { ElevatorSystem } from './city/elevator';
 import { createKabukiMarket } from './city/kabukiMarket';
 import { createTrafficLights } from './traffic/trafficLights';
@@ -71,14 +72,16 @@ async function start(): Promise<void> {
   const plots = await boot.step('解析城区结构 // PARSING DISTRICTS', () =>
     generatePlots(SEED));
 
-  // 全城楼体一层挑空 + 通用大堂壳：每栋楼都可进入
-  const lobbies = await boot.step('浇筑楼群 // EXTRUDING BLOCKS', () => {
+  // 全城楼体一层挑空 + 通用大堂壳 + 业态家具：每栋楼都是真实场所
+  const { lobbies, kits } = await boot.step('浇筑楼群 // EXTRUDING BLOCKS', () => {
     const buildings = createBuildings(plots, SEED);
     engine.scene.add(buildings.group);
     updatables.push(buildings);
     const lb = createLobbies(plots);
     engine.scene.add(lb.group);
-    return lb;
+    const ik = createInteriorKits(plots, SEED);
+    engine.scene.add(ik.group);
+    return { lobbies: lb, kits: ik };
   });
 
   const highway = await boot.step('铺设路网 // PAVING GRID', () => {
@@ -163,6 +166,7 @@ async function start(): Promise<void> {
   // 漫游碰撞：大堂墙体/电梯 + 市场摊位排（楼体一层挑空，门洞是入口）
   const colliderGrid = new ColliderGrid(64);
   for (const c of lobbies.colliders) colliderGrid.add(c);
+  for (const c of kits.colliders) colliderGrid.add(c);
   for (const c of kabuki.colliders) colliderGrid.add(c);
   walk.setColliders(colliderGrid);
   const modes = new ModeManager(engine.camera, fly, walk);
