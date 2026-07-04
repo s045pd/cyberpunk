@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createRng, range } from '../core/rng';
-import { LightStream, StreamDef } from './lightStream';
+import { VehicleFleet, LaneDef } from './vehicles';
 
 /** 纯几何、可单测：3 条环线 + 3 条穿城环，全部闭合 CatmullRom */
 export function buildAirCurves(seed: number): THREE.CatmullRomCurve3[] {
@@ -40,13 +40,15 @@ export function buildAirCurves(seed: number): THREE.CatmullRomCurve3[] {
   return curves;
 }
 
-export function createAirTraffic(seed: number): LightStream {
-  const defs: StreamDef[] = buildAirCurves(seed).map((curve, i) => ({
+/** 空中车流：有体积的 AV 飞行器（推进器辉光 + 警示闪灯 + 悬浮起伏） */
+export function createAirTraffic(seed: number): VehicleFleet {
+  const lanes: LaneDef[] = buildAirCurves(seed).map((curve, i) => ({
     curve,
-    count: 55,
-    headColor: i % 2 === 0 ? 0xfff4d8 : 0xd8f4ff,
-    tailColor: 0xff3344,
-    speedRange: [0.008, 0.02],
+    count: 30,
+    speedRange: [28, 55],           // 米/秒
+    lateralOffset: (i % 2) * 8 - 4, // 同环双车道错开
   }));
-  return new LightStream(defs, (seed ^ 0xa2) >>> 0);
+  return new VehicleFleet({
+    lanes, kinds: ['av'], seed: (seed ^ 0xa2) >>> 0, bob: 1.3,
+  });
 }

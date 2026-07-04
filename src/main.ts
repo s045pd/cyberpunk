@@ -73,7 +73,7 @@ async function start(): Promise<void> {
     engine.scene.add(createBridges(plots, SEED));
     const hw = createHighway(SEED);
     engine.scene.add(hw.group);
-    updatables.push({ update: (dt) => hw.update(dt) });
+    updatables.push({ update: (dt, t) => hw.update(dt, t) });
     return hw;
   });
 
@@ -87,10 +87,10 @@ async function start(): Promise<void> {
     () => {
       const air = createAirTraffic(SEED);
       const ground = createGroundTraffic(SEED);
-      engine.scene.add(air.points, ground.points);
+      engine.scene.add(air.group, ground.group);
       updatables.push(
-        { update: (dt) => air.update(dt) },
-        { update: (dt) => ground.update(dt) },
+        { update: (dt, t) => air.update(dt, t) },
+        { update: (dt, t) => ground.update(dt, t) },
       );
       return { airTraffic: air, groundTraffic: ground };
     },
@@ -135,6 +135,11 @@ async function start(): Promise<void> {
     hud.setQualityName(q.name);
   };
   applyQuality();
+
+  // 开发调试句柄（E2E/预览用于机位摆放）
+  (window as unknown as Record<string, unknown>).__nc = {
+    camera: engine.camera, fly, walk, monitor,
+  };
 
   await boot.waitForStart();
 
