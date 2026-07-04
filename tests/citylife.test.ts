@@ -5,6 +5,7 @@ import { pickIncidentSites } from '../src/events/incidents';
 import { doorInfoFor } from '../src/city/lobbies';
 import { buildKabukiLayout, MARKET_CENTER, MARKET_HALF, ALLEY_W } from '../src/city/kabukiMarket';
 import { greenFor, listIntersections, CYCLE } from '../src/traffic/trafficLights';
+import { venueFor, VENUE_COLORS } from '../src/city/interiorKits';
 import { coastXAt, WATER_EAST_MAX } from '../src/city/water';
 import { generatePlots, distToRoad } from '../src/city/layout';
 import { districtAt } from '../src/city/districts';
@@ -144,5 +145,36 @@ describe('Kabuki 市场布局', () => {
   it('巷道数量与人流配置齐全', () => {
     expect(layout.lanes.length).toBeGreaterThan(10);
     for (const lane of layout.lanes) expect(lane.count).toBeGreaterThan(0);
+  });
+});
+
+describe('venueFor（区域业态分配）', () => {
+  it('确定性：同输入同结果', () => {
+    expect(venueFor('watson', 80, 0.3)).toBe(venueFor('watson', 80, 0.3));
+  });
+
+  it('市中心超高层以公司大堂为主', () => {
+    let corpo = 0;
+    for (let i = 0; i < 100; i++) {
+      if (venueFor('city-center', 300, i / 100) === 'corpo') corpo++;
+    }
+    expect(corpo).toBeGreaterThan(50);
+  });
+
+  it('Pacifica 废弃大堂占比最高', () => {
+    const counts = new Map<string, number>();
+    for (let i = 0; i < 100; i++) {
+      const v = venueFor('pacifica', 40, i / 100);
+      counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    expect(top).toBe('ruin');
+  });
+
+  it('所有场所类型都有门头色标', () => {
+    for (const kind of ['bar', 'bd', 'ripper', 'food', 'clothes', 'guns', 'net',
+      'residential', 'corpo', 'motel', 'warehouse', 'pachinko', 'ruin'] as const) {
+      expect(VENUE_COLORS[kind]).toBeGreaterThan(0);
+    }
   });
 });
