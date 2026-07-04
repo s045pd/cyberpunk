@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LightStream, StreamDef } from './lightStream';
+import { VehicleFleet, LaneDef } from './vehicles';
 
 const ROAD_SPACING = 480;   // 与 layout.ts 对齐
 const CITY_RADIUS = 3400;
@@ -36,13 +36,15 @@ export function buildRoadCurves(): THREE.LineCurve3[] {
   return curves;
 }
 
-export function createGroundTraffic(seed: number): LightStream {
-  const defs: StreamDef[] = buildRoadCurves().map((curve) => ({
+/** 地面车流：真实车体（轿车/厢货/跑车），贴地行驶 */
+export function createGroundTraffic(seed: number): VehicleFleet {
+  const lanes: LaneDef[] = buildRoadCurves().map((curve) => ({
     curve,
-    count: 26,
-    headColor: 0xffffff,
-    tailColor: 0xff2010,
-    speedRange: [0.01, 0.03],
+    count: 40,
+    speedRange: [9, 20],       // 米/秒，市区速度
+    yOffset: -ROAD_Y + 0.05,   // 曲线在 y=3，车轮贴回路面
   }));
-  return new LightStream(defs, (seed ^ 0x60) >>> 0);
+  return new VehicleFleet({
+    lanes, kinds: ['sedan', 'van', 'sport'], seed: (seed ^ 0x60) >>> 0,
+  });
 }

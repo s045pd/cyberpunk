@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { createRng, range } from '../core/rng';
-import { LightStream, StreamDef } from '../traffic/lightStream';
+import { VehicleFleet, LaneDef } from '../traffic/vehicles';
 
 const DECK_SEGMENTS = 240;
 
 export interface Highway {
   group: THREE.Group;
-  update(dt: number): void;
+  update(dt: number, t: number): void;
   setDensity(fraction: number): void;
 }
 
@@ -122,28 +122,21 @@ export function createHighway(seed: number): Highway {
   dots.frustumCulled = false;
   group.add(dots);
 
-  // 桥面车流（双向）
-  const defs: StreamDef[] = curves.flatMap((curve, i): StreamDef[] => [
-    {
-      curve, count: 60, headColor: 0xfff2d8, tailColor: 0xff3030,
-      speedRange: [0.012, 0.02],
-    },
-    {
-      curve: new THREE.CatmullRomCurve3(
-        curve.getSpacedPoints(28).reverse().map((p) => p.clone().add(
-          new THREE.Vector3(0, 3.5 + i, 0),
-        )), true, 'catmullrom', 0.5,
-      ),
-      count: 60, headColor: 0xd8f0ff, tailColor: 0xff3030,
-      speedRange: [0.012, 0.02],
-    },
+  // 桥面车流：真实车体，双向各两条车道（曲线在桥面中心，车轮抬到桥面上）
+  const lanes: LaneDef[] = curves.flatMap((curve): LaneDef[] => [
+    { curve, count: 40, speedRange: [22, 32], lateralOffset: 3, yOffset: 1.3 },
+    { curve, count: 24, speedRange: [22, 30], lateralOffset: 6.5, yOffset: 1.3 },
+    { curve, count: 40, speedRange: [22, 32], lateralOffset: -3, yOffset: 1.3, dir: -1 },
+    { curve, count: 24, speedRange: [22, 30], lateralOffset: -6.5, yOffset: 1.3, dir: -1 },
   ]);
-  const stream = new LightStream(defs, (seed ^ 0x419b) >>> 0);
-  group.add(stream.points);
+  const fleet = new VehicleFleet({
+    lanes, kinds: ['sedan', 'van', 'sport'], seed: (seed ^ 0x419b) >>> 0,
+  });
+  group.add(fleet.group);
 
   return {
     group,
-    update(dt: number) { stream.update(dt); },
-    setDensity(fraction: number) { stream.setDensity(fraction); },
+    update(dt: number, t: number) { fleet.update(dt, t); },
+    setDensity(fraction: number) { fleet.setDensity(fraction); },
   };
 }
