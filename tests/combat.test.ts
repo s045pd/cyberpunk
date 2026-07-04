@@ -7,6 +7,7 @@ import { WantedSystem } from '../src/events/wanted';
 import { GANGS, planSquads } from '../src/people/gangs';
 import * as THREE from 'three';
 import { PedFleet } from '../src/people/pedestrians';
+import { ActiveNpcPool } from '../src/people/activeNpcs';
 import { districtAt } from '../src/city/districts';
 
 describe('HealthRegistry', () => {
@@ -244,5 +245,30 @@ describe('PedFleet 战斗接口', () => {
     fleet.forEachWalkerNear(50, 0, 10000, 1, () => all++);
     expect(all).toBeGreaterThanOrEqual(count);
     expect(all).toBeGreaterThan(0);
+  });
+});
+
+describe('ActiveNpcPool', () => {
+  it('按小队与 NCPD 配置生成单位，全部注册血量', () => {
+    const health = new HealthRegistry();
+    const pool = new ActiveNpcPool({
+      seed: 42, squads: planSquads(42), ncpdPairs: 8, health,
+    });
+    const gangers = pool.units.filter((u) => u.role === 'ganger').length;
+    const cops = pool.units.filter((u) => u.role === 'ncpd').length;
+    expect(gangers).toBeGreaterThanOrEqual(4 * 6 * 3);
+    expect(cops).toBe(16);
+    for (const u of pool.units) expect(health.hpOf(u.id)).toBe(100);
+  });
+
+  it('斗殴者按需生成并可击杀移除', () => {
+    const health = new HealthRegistry();
+    const pool = new ActiveNpcPool({ seed: 7, squads: [], ncpdPairs: 0, health });
+    const brawlers = pool.spawnBrawlers(100, 100, 3, 0);
+    expect(brawlers.length).toBe(3);
+    pool.applyDeath(brawlers[0], 5);
+    expect(brawlers[0].state).toBe('dead');
+    pool.recycle(30);
+    expect(pool.units.includes(brawlers[0])).toBe(false);
   });
 });
