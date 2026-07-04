@@ -7,7 +7,7 @@ import { createRain } from './atmosphere/rain';
 import { LightningDirector } from './atmosphere/lightning';
 import { generatePlots } from './city/layout';
 import { createBuildings } from './city/buildings';
-import { createGround } from './city/ground';
+import { createGround, createStreetLamps } from './city/ground';
 import { createNeon } from './city/neon';
 import { createLandmarks } from './city/landmarks/index';
 import { createAirTraffic } from './traffic/airTraffic';
@@ -64,7 +64,8 @@ async function start(): Promise<void> {
   updatables.push(buildings);
 
   await boot.step('铺设路网 // PAVING GRID', () => {
-    engine.scene.add(createGround());
+    engine.scene.add(createGround(SEED));
+    engine.scene.add(createStreetLamps());
     engine.scene.add(createLandmarks(SEED));
   });
 

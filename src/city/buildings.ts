@@ -2,31 +2,39 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Plot } from './layout';
 import { DISTRICTS } from './districts';
-import { createRng, range } from '../core/rng';
+import { createRng, range, pick } from '../core/rng';
 import { FOG_COLOR, FOG_DENSITY } from '../core/engine';
 
-const KIND_COUNT = 5;
+const KIND_COUNT = 8;
 
 // 注意：InstancedMesh 渲染时 three 会定义 USE_INSTANCING 并在 ShaderMaterial
 // 前缀里自动声明 attribute mat4 instanceMatrix，这里不能重复声明。
 const VERT = /* glsl */ `
 attribute vec3 aScale;
 attribute vec3 aTint;
+attribute vec3 aAccent;
 attribute float aLit;
 attribute float aSeed;
+attribute float aTrim;
 varying vec3 vLocal;
+varying vec3 vScale;
 varying vec3 vNormal;
 varying vec3 vTint;
+varying vec3 vAccent;
 varying float vLit;
 varying float vSeed;
+varying float vTrim;
 varying float vDist;
 
 void main() {
   vLocal = position * aScale;
+  vScale = aScale;
   vNormal = normal;
   vTint = aTint;
+  vAccent = aAccent;
   vLit = aLit;
   vSeed = aSeed;
+  vTrim = aTrim;
   vec4 world = instanceMatrix * vec4(vLocal, 1.0);
   vec4 view = viewMatrix * world;
   vDist = -view.z;
@@ -39,10 +47,13 @@ uniform float uTime;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
 varying vec3 vLocal;
+varying vec3 vScale;
 varying vec3 vNormal;
 varying vec3 vTint;
+varying vec3 vAccent;
 varying float vLit;
 varying float vSeed;
+varying float vTrim;
 varying float vDist;
 
 float hash21(vec2 p) {
@@ -53,30 +64,44 @@ float hash21(vec2 p) {
 
 void main() {
   vec3 n = normalize(vNormal);
-  // 暗立面基色 + 微弱顶面光
-  vec3 col = vTint * (0.35 + 0.5 * max(n.y, 0.0));
+  // 深色立面：夜之城的楼体剪影几乎是黑的
+  vec3 col = vTint * (0.22 + 0.3 * max(n.y, 0.0));
 
-  // 侧面窗格
+  // 侧面窗格：细窗 + 整层光带
   if (abs(n.y) < 0.5) {
     vec2 wallUV = abs(n.x) > 0.5 ? vLocal.zy : vLocal.xy;
-    vec2 cellSize = vec2(4.0, 3.6);
+    vec2 cellSize = vec2(2.6, 3.2);
     vec2 cell = floor(wallUV / cellSize);
     vec2 f = fract(wallUV / cellSize);
     float rnd = hash21(cell + vSeed);
-    float lit = step(1.0 - vLit, rnd);
-    float frame = step(0.18, f.x) * step(f.x, 0.82)
-                * step(0.22, f.y) * step(f.y, 0.88);
+    // 每层整体命运：40% 楼层是亮带（办公整层），其余按窗亮率零星点亮
+    float band = hash21(vec2(cell.y, vSeed));
+    float bandBoost = mix(0.45, 1.6, step(0.68, band));
+    float lit = step(1.0 - clamp(vLit * bandBoost, 0.0, 0.9), rnd);
+    float frame = step(0.2, f.x) * step(f.x, 0.8)
+                * step(0.28, f.y) * step(f.y, 0.85);
     float warm = hash21(cell + vSeed + 7.0);
-    vec3 winCol = mix(vec3(0.35, 0.72, 1.0), vec3(1.0, 0.72, 0.38), step(0.55, warm));
+    // 暖黄 / 冷白 / 青 三色窗光
+    vec3 winCol = warm < 0.42
+      ? vec3(1.0, 0.68, 0.32)
+      : (warm < 0.8 ? vec3(0.85, 0.9, 1.0) : vec3(0.4, 0.95, 0.9));
     float flicker = 1.0;
-    if (rnd > 0.986) {
+    if (rnd > 0.988) {
       flicker = 0.4 + 0.6 * step(0.0, sin(uTime * (8.0 + warm * 40.0) + vSeed * 10.0));
     }
-    col += winCol * lit * frame * flicker * 1.7;
+    col += winCol * lit * frame * flicker * 1.15;
   }
 
-  // 近地面压暗（假 AO）
-  col *= clamp(vLocal.y / 25.0 + 0.35, 0.35, 1.0);
+  // 霓虹描边：约 1/5 的楼有 —— 层顶光带 + 立面棱线（夜之城式建筑轮廓灯）
+  if (vTrim > 0.5) {
+    float topBand = step(vScale.y * 0.965, vLocal.y) * step(vLocal.y, vScale.y * 1.005);
+    float cornerX = step(vScale.x * 0.465, abs(vLocal.x));
+    float cornerZ = step(vScale.z * 0.465, abs(vLocal.z));
+    col += vAccent * (topBand * 2.4 + cornerX * cornerZ * 1.1);
+  }
+
+  // 近地面压暗（街道峡谷阴影）
+  col *= clamp(vLocal.y / 30.0 + 0.3, 0.3, 1.0);
 
   // 指数平方雾（与 scene.fog 一致）
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * vDist * vDist);
@@ -92,35 +117,79 @@ function unitBox(): THREE.BufferGeometry {
   return g;
 }
 
+/** 顶部机房/水箱等屋顶杂物，增加轮廓细节 */
+function roofClutter(y: number): THREE.BufferGeometry[] {
+  const a = unitBox();
+  a.scale(0.28, 0.08, 0.22);
+  a.translate(-0.2, y, 0.15);
+  const b = unitBox();
+  b.scale(0.16, 0.12, 0.16);
+  b.translate(0.22, y, -0.18);
+  return [a, b];
+}
+
 function archetypeGeometry(kind: number): THREE.BufferGeometry {
   switch (kind) {
-    case 1: { // 阶梯塔：主体 + 收分顶部
+    case 1: { // 两段收分
       const top = unitBox();
-      top.scale(0.62, 0.32, 0.62);
+      top.scale(0.68, 0.34, 0.68);
       top.translate(0, 1.0, 0);
-      return mergeGeometries([unitBox(), top]);
+      return mergeGeometries([unitBox(), top, ...roofClutter(1.34)]);
     }
-    case 2: { // 天线塔
-      const mast = new THREE.BoxGeometry(0.05, 0.4, 0.05);
-      mast.translate(0, 1.2, 0);
-      return mergeGeometries([unitBox(), mast]);
+    case 2: { // 三段收分（下城超塔轮廓）
+      const mid = unitBox();
+      mid.scale(0.78, 0.4, 0.78);
+      mid.translate(0, 1.0, 0);
+      const top = unitBox();
+      top.scale(0.55, 0.28, 0.55);
+      top.translate(0, 1.4, 0);
+      return mergeGeometries([unitBox(), mid, top]);
     }
-    case 3: { // 板楼（矮宽）
+    case 3: { // 板楼
       const g = unitBox();
-      g.scale(1.35, 0.62, 0.75);
-      return g;
+      g.scale(1.3, 0.62, 0.78);
+      return mergeGeometries([g, ...roofClutter(0.62)]);
     }
-    case 4: { // 双子楼
+    case 4: { // 双子楼 + 连桥
       const a = unitBox();
       a.scale(0.42, 1.0, 0.9);
       a.translate(-0.28, 0, 0);
       const b = unitBox();
-      b.scale(0.42, 0.82, 0.9);
+      b.scale(0.42, 0.84, 0.9);
       b.translate(0.28, 0, 0);
-      return mergeGeometries([a, b]);
+      const bridge = unitBox();
+      bridge.scale(0.18, 0.04, 0.5);
+      bridge.translate(0, 0.6, 0);
+      return mergeGeometries([a, b, bridge]);
+    }
+    case 5: { // 裙楼 + 塔楼（企业塔经典形态）
+      const podium = unitBox();
+      podium.scale(1.0, 0.16, 1.0);
+      const tower = unitBox();
+      tower.scale(0.56, 0.9, 0.56);
+      tower.translate(0, 0.16, 0);
+      return mergeGeometries([podium, tower, ...roofClutter(0.18)]);
+    }
+    case 6: { // 天线塔
+      const mast = new THREE.BoxGeometry(0.04, 0.42, 0.04);
+      mast.translate(0.12, 1.2, -0.1);
+      const mast2 = new THREE.BoxGeometry(0.03, 0.28, 0.03);
+      mast2.translate(-0.18, 1.13, 0.14);
+      return mergeGeometries([unitBox(), mast, mast2, ...roofClutter(1.0)]);
+    }
+    case 7: { // 低层工业：主体 + 屋顶储罐群
+      const g = unitBox();
+      g.scale(1.2, 0.8, 1.0);
+      const t1 = unitBox();
+      t1.scale(0.2, 0.5, 0.2);
+      t1.translate(-0.3, 0.8, 0.2);
+      const t2 = unitBox();
+      t2.scale(0.14, 0.36, 0.14);
+      t2.translate(0.25, 0.8, -0.15);
+      return mergeGeometries([g, t1, t2]);
     }
     default:
-      return unitBox();
+      return mergeGeometries([unitBox(), ...roofClutter(1.0)]);
   }
 }
 
@@ -148,6 +217,7 @@ export function createBuildings(plots: Plot[], seed: number): Buildings {
   for (const p of plots) byKind[p.kind].push(p);
 
   const tint = new THREE.Color();
+  const accent = new THREE.Color();
   const m = new THREE.Matrix4();
 
   byKind.forEach((list, kind) => {
@@ -157,25 +227,34 @@ export function createBuildings(plots: Plot[], seed: number): Buildings {
 
     const aScale = new Float32Array(list.length * 3);
     const aTint = new Float32Array(list.length * 3);
+    const aAccent = new Float32Array(list.length * 3);
     const aLit = new Float32Array(list.length);
     const aSeed = new Float32Array(list.length);
+    const aTrim = new Float32Array(list.length);
 
     list.forEach((p, i) => {
       m.makeTranslation(p.x, 0, p.z);
       mesh.setMatrixAt(i, m);
       aScale.set([p.sx, p.h, p.sz], i * 3);
-      tint.setHex(styleById.get(p.district)!.facadeColor);
+      const style = styleById.get(p.district)!;
+      tint.setHex(style.facadeColor);
       const jitter = range(rng, 0.8, 1.2);
       aTint.set([tint.r * jitter, tint.g * jitter, tint.b * jitter], i * 3);
+      accent.setHex(pick(rng, style.neonPalette));
+      aAccent.set([accent.r, accent.g, accent.b], i * 3);
       aLit[i] = p.litRate;
       aSeed[i] = range(rng, 0, 100);
+      // 约 1/5 的中高层楼有霓虹描边；高楼概率更高
+      aTrim[i] = rng() < (p.h > 120 ? 0.34 : 0.16) ? 1 : 0;
     });
 
     const geo = mesh.geometry;
     geo.setAttribute('aScale', new THREE.InstancedBufferAttribute(aScale, 3));
     geo.setAttribute('aTint', new THREE.InstancedBufferAttribute(aTint, 3));
+    geo.setAttribute('aAccent', new THREE.InstancedBufferAttribute(aAccent, 3));
     geo.setAttribute('aLit', new THREE.InstancedBufferAttribute(aLit, 1));
     geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(aSeed, 1));
+    geo.setAttribute('aTrim', new THREE.InstancedBufferAttribute(aTrim, 1));
     mesh.instanceMatrix.needsUpdate = true;
     group.add(mesh);
   });

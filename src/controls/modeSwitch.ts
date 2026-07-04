@@ -14,7 +14,8 @@ function smooth(k: number): number {
 
 export class ModeManager {
   mode: Mode = 'fly';
-  private remaining = 0;
+  // 用真实时钟驱动过渡：低帧率设备上 dt 会被钳制，按帧累计会拖成慢动作
+  private startedAt = -1;
   private from = new THREE.Vector3();
   private to = new THREE.Vector3();
   private target: Mode = 'fly';
@@ -35,7 +36,7 @@ export class ModeManager {
   }
 
   get transitioning(): boolean {
-    return this.remaining > 0;
+    return this.startedAt >= 0;
   }
 
   toggle(): void {
@@ -50,15 +51,16 @@ export class ModeManager {
     }
     this.fly.enabled = false;
     this.walk.enabled = false;
-    this.remaining = TRANSITION_SEC;
+    this.startedAt = performance.now();
   }
 
-  update(dt: number): void {
+  update(_dt: number): void {
     if (!this.transitioning) return;
-    this.remaining = Math.max(0, this.remaining - dt);
-    const k = smooth(1 - this.remaining / TRANSITION_SEC);
+    const elapsed = (performance.now() - this.startedAt) / 1000;
+    const k = smooth(Math.min(elapsed / TRANSITION_SEC, 1));
     this.camera.position.lerpVectors(this.from, this.to, k);
-    if (this.remaining === 0) {
+    if (k >= 1) {
+      this.startedAt = -1;
       this.mode = this.target;
       if (this.mode === 'walk') {
         this.walk.syncFromCamera();

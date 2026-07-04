@@ -218,6 +218,191 @@ function createHolos(rng: Rng): Holo[] {
   });
 }
 
+// ---------- 大型广告屏（夜之城的招牌元素） ----------
+
+const AD_WORDS: Array<[string, string]> = [
+  ['NEKO-COLA', '冰爽 · 合成'],
+  ['義体診所', 'RIPPERDOC 24H'],
+  ['CHROME', 'UPGRADE YOURSELF'],
+  ['NEON NOODLE', '深夜営業'],
+  ['DATA HEAVEN', 'JACK IN NOW'],
+  ['XO-TEK', '軍用規格'],
+  ['999 MOTEL', 'NO QUESTIONS'],
+  ['NIGHT FM', '107.3 MHz'],
+];
+
+const AD_COLORS: Array<[string, string]> = [
+  ['#ff2975', '#2b0030'],
+  ['#00e5ff', '#001b30'],
+  ['#ffe600', '#301a00'],
+  ['#b96bff', '#14002b'],
+  ['#00ffd5', '#00251c'],
+  ['#ff6a00', '#2b0d00'],
+  ['#ff4060', '#20000c'],
+  ['#7dff45', '#0c2000'],
+];
+
+function buildAdAtlas(): THREE.CanvasTexture {
+  const W = 2048;
+  const H = 1024;
+  const T = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+
+  AD_WORDS.forEach(([title, sub], i) => {
+    const cx = (i % 4) * T;
+    const cy = Math.floor(i / 4) * T;
+    const [fg, bg] = AD_COLORS[i];
+    ctx.save();
+    ctx.translate(cx, cy);
+    const grad = ctx.createLinearGradient(0, 0, 0, T);
+    grad.addColorStop(0, bg);
+    grad.addColorStop(1, '#050508');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, T, T);
+    ctx.fillStyle = fg;
+    ctx.shadowColor = fg;
+    ctx.shadowBlur = 26;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `900 ${T * 0.16}px sans-serif`;
+    ctx.fillText(title, T / 2, T * 0.4, T - 60);
+    ctx.font = `500 ${T * 0.07}px sans-serif`;
+    ctx.fillStyle = '#e8e8f0';
+    ctx.shadowBlur = 10;
+    ctx.fillText(sub, T / 2, T * 0.62, T - 80);
+    // 底部条码装饰
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = fg;
+    let bx = 40;
+    let k = i + 3;
+    while (bx < T - 40) {
+      const bw = 4 + ((k * 7919) % 14);
+      ctx.fillRect(bx, T * 0.82, bw * 0.5, T * 0.08);
+      bx += bw;
+      k++;
+    }
+    ctx.strokeStyle = fg;
+    ctx.lineWidth = 8;
+    ctx.strokeRect(10, 10, T - 20, T - 20);
+    ctx.restore();
+  });
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+const AD_VERT = /* glsl */ `
+attribute vec2 aUvOffset;
+attribute float aSeed;
+varying vec2 vUv;
+varying vec2 vUvOffset;
+varying float vSeed;
+void main() {
+  vUv = uv;
+  vUvOffset = aUvOffset;
+  vSeed = aSeed;
+  gl_Position = projectionMatrix * viewMatrix * instanceMatrix * vec4(position, 1.0);
+}
+`;
+
+const AD_FRAG = /* glsl */ `
+uniform sampler2D uMap;
+uniform float uTime;
+varying vec2 vUv;
+varying vec2 vUvOffset;
+varying float vSeed;
+void main() {
+  vec2 uv = vUv;
+  // 偶发水平故障错位
+  float glitchGate = step(0.965, fract(uTime * 0.37 + vSeed));
+  uv.x += glitchGate * (fract(vSeed * 91.7 + floor(vUv.y * 24.0) * 0.37) - 0.5) * 0.12;
+  vec4 t = texture2D(uMap, uv * vec2(0.25, 0.5) + vUvOffset);
+  // 扫描线 + 缓慢滚动亮带 + 呼吸
+  float scan = 0.82 + 0.18 * step(0.5, fract(vUv.y * 90.0));
+  float sweep = 0.85 + 0.3 * smoothstep(0.12, 0.0,
+    abs(fract(vUv.y * 0.9 - uTime * 0.11 + vSeed) - 0.5) - 0.32);
+  float pulse = 0.85 + 0.15 * sin(uTime * (0.8 + fract(vSeed) * 1.6) + vSeed);
+  gl_FragColor = vec4(t.rgb * scan * sweep * pulse * 1.9, 1.0);
+}
+`;
+
+function createBillboards(plots: Plot[], rng: Rng): THREE.InstancedMesh {
+  const tall = [...plots].sort((a, b) => b.h - a.h).slice(0, 320);
+
+  interface AdSpec { matrix: THREE.Matrix4; uv: [number, number]; seed: number; }
+  const specs: AdSpec[] = [];
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const scl = new THREE.Vector3();
+  const euler = new THREE.Euler();
+
+  for (const p of tall) {
+    if (specs.length >= 260) break;
+    const tileIdx = Math.floor(rng() * AD_WORDS.length);
+    const uv: [number, number] = [
+      (tileIdx % 4) * 0.25,
+      (1 - Math.floor(tileIdx / 4)) * 0.5,
+    ];
+
+    if (rng() < 0.55) {
+      // 楼面挂屏
+      const w = Math.min(p.sx * 0.95, 36) * range(rng, 0.7, 1.2);
+      const h = w * range(rng, 0.8, 1.15);
+      const side = Math.floor(rng() * 4);
+      const offset = side % 2 === 0 ? p.sz / 2 + 1.0 : p.sx / 2 + 1.0;
+      pos.set(p.x, range(rng, 0.45, 0.85) * p.h, p.z);
+      if (side === 0) pos.z += offset;
+      if (side === 1) pos.x += offset;
+      if (side === 2) pos.z -= offset;
+      if (side === 3) pos.x -= offset;
+      euler.set(0, (side * Math.PI) / 2, 0);
+      scl.set(w, h, 1);
+    } else {
+      // 楼顶立屏（随机朝向 + 轻微俯角）
+      const w = Math.min(p.sx * 1.25, 44) * range(rng, 0.7, 1.2);
+      const h = w * 0.55;
+      pos.set(p.x, p.h + h / 2 + 2, p.z);
+      euler.set(-0.1, rng() * Math.PI * 2, 0);
+      scl.set(w, h, 1);
+    }
+    quat.setFromEuler(euler);
+    specs.push({
+      matrix: new THREE.Matrix4().compose(pos, quat, scl),
+      uv,
+      seed: rng() * 100,
+    });
+  }
+
+  const material = new THREE.ShaderMaterial({
+    vertexShader: AD_VERT,
+    fragmentShader: AD_FRAG,
+    uniforms: { uMap: { value: buildAdAtlas() }, uTime: { value: 0 } },
+    side: THREE.DoubleSide,
+  });
+
+  const mesh = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(1, 1), material, specs.length,
+  );
+  mesh.frustumCulled = false;
+  const aUvOffset = new Float32Array(specs.length * 2);
+  const aSeed = new Float32Array(specs.length);
+  specs.forEach((s, i) => {
+    mesh.setMatrixAt(i, s.matrix);
+    aUvOffset.set(s.uv, i * 2);
+    aSeed[i] = s.seed;
+  });
+  const geo = mesh.geometry;
+  geo.setAttribute('aUvOffset', new THREE.InstancedBufferAttribute(aUvOffset, 2));
+  geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(aSeed, 1));
+  mesh.instanceMatrix.needsUpdate = true;
+  return mesh;
+}
+
 export interface Neon {
   group: THREE.Group;
   update(dt: number, t: number): void;
@@ -228,6 +413,8 @@ export function createNeon(plots: Plot[], seed: number): Neon {
   const group = new THREE.Group();
   const signs = createSigns(plots, rng);
   group.add(signs);
+  const billboards = createBillboards(plots, rng);
+  group.add(billboards);
   const holos = createHolos(rng);
   for (const h of holos) group.add(h.mesh);
 
@@ -235,6 +422,7 @@ export function createNeon(plots: Plot[], seed: number): Neon {
     group,
     update(dt: number, t: number) {
       (signs.material as THREE.ShaderMaterial).uniforms.uTime.value = t;
+      (billboards.material as THREE.ShaderMaterial).uniforms.uTime.value = t;
       for (const h of holos) {
         h.mesh.rotation.y += dt * h.speed;
         (h.mesh.material as THREE.ShaderMaterial).uniforms.uTime.value = t;

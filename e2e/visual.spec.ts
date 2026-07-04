@@ -25,7 +25,8 @@ test('飞行模式首帧渲染且无页面错误', async ({ page }, testInfo) =>
 test('切换漫游模式后正常渲染', async ({ page }, testInfo) => {
   const errors = await jackIn(page);
   await page.keyboard.press('KeyF');
-  await page.waitForTimeout(2500); // 降落过渡完成
+  await page.waitForTimeout(3500); // 降落过渡完成
+  await expect(page.locator('.hud-keys')).toContainText('起飞');
   await page.screenshot({
     path: testInfo.outputPath('walk-mode.png'),
     fullPage: true,
