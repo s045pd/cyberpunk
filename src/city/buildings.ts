@@ -64,44 +64,59 @@ float hash21(vec2 p) {
 
 void main() {
   vec3 n = normalize(vNormal);
-  // 深色立面：夜之城的楼体剪影几乎是黑的
-  vec3 col = vTint * (0.22 + 0.3 * max(n.y, 0.0));
+  float side = step(abs(n.y), 0.5);
+  vec2 wallUV = abs(n.x) > 0.5 ? vLocal.zy : vLocal.xy;
 
-  // 侧面窗格：细窗 + 整层光带
-  if (abs(n.y) < 0.5) {
-    vec2 wallUV = abs(n.x) > 0.5 ? vLocal.zy : vLocal.xy;
+  // ---- 立面材质：面板拼布 + 竖梃，让楼体在夜里也是可见的实体 ----
+  vec3 base = vTint;
+  float panelRnd = hash21(floor(wallUV / vec2(11.0, 12.8)) + vSeed);
+  base *= mix(1.0, 0.72 + panelRnd * 0.6, side);
+  float mull = step(fract(wallUV.x / 7.5), 0.06) * side;
+  base *= 1.0 - mull * 0.35;
+
+  vec3 col = base * (0.55 + 0.3 * max(n.y, 0.0));
+
+  // 楼板暗线：每层一道，体量分层可读
+  float slab = step(fract(vLocal.y / 3.2), 0.07) * side;
+  col *= 1.0 - slab * 0.45;
+
+  // 街道光反弹：底部数十米被城市霓虹与钠灯晕染
+  float bounce = exp(-max(vLocal.y - 3.0, 0.0) / 42.0);
+  col += (vAccent * 0.4 + vec3(0.5, 0.30, 0.12)) * bounce * 0.22;
+
+  // ---- 窗格：未亮的窗是深色玻璃，亮窗压在 bloom 阈值下 ----
+  if (side > 0.5) {
     vec2 cellSize = vec2(2.6, 3.2);
     vec2 cell = floor(wallUV / cellSize);
     vec2 f = fract(wallUV / cellSize);
     float rnd = hash21(cell + vSeed);
-    // 每层整体命运：40% 楼层是亮带（办公整层），其余按窗亮率零星点亮
     float band = hash21(vec2(cell.y, vSeed));
-    float bandBoost = mix(0.45, 1.6, step(0.68, band));
-    float lit = step(1.0 - clamp(vLit * bandBoost, 0.0, 0.9), rnd);
-    float frame = step(0.2, f.x) * step(f.x, 0.8)
-                * step(0.28, f.y) * step(f.y, 0.85);
+    float bandBoost = mix(0.45, 1.5, step(0.72, band));
+    float lit = step(1.0 - clamp(vLit * bandBoost, 0.0, 0.85), rnd);
+    float inWin = step(0.2, f.x) * step(f.x, 0.8)
+                * step(0.3, f.y) * step(f.y, 0.85);
+    col = mix(col, col * 0.4 + vec3(0.012, 0.016, 0.028), inWin * (1.0 - lit));
     float warm = hash21(cell + vSeed + 7.0);
-    // 暖黄 / 冷白 / 青 三色窗光
     vec3 winCol = warm < 0.42
-      ? vec3(1.0, 0.68, 0.32)
-      : (warm < 0.8 ? vec3(0.85, 0.9, 1.0) : vec3(0.4, 0.95, 0.9));
+      ? vec3(1.0, 0.66, 0.30)
+      : (warm < 0.8 ? vec3(0.8, 0.85, 0.95) : vec3(0.45, 0.9, 0.85));
     float flicker = 1.0;
     if (rnd > 0.988) {
       flicker = 0.4 + 0.6 * step(0.0, sin(uTime * (8.0 + warm * 40.0) + vSeed * 10.0));
     }
-    col += winCol * lit * frame * flicker * 1.15;
+    col += winCol * lit * inWin * flicker * 1.1;
   }
 
-  // 霓虹描边：约 1/5 的楼有 —— 层顶光带 + 立面棱线（夜之城式建筑轮廓灯）
+  // 霓虹描边：少量楼体的层顶光带 + 棱线（收敛，不喧宾夺主）
   if (vTrim > 0.5) {
     float topBand = step(vScale.y * 0.965, vLocal.y) * step(vLocal.y, vScale.y * 1.005);
     float cornerX = step(vScale.x * 0.465, abs(vLocal.x));
     float cornerZ = step(vScale.z * 0.465, abs(vLocal.z));
-    col += vAccent * (topBand * 2.4 + cornerX * cornerZ * 1.1);
+    col += vAccent * (topBand * 1.6 + cornerX * cornerZ * 0.6);
   }
 
   // 近地面压暗（街道峡谷阴影）
-  col *= clamp(vLocal.y / 30.0 + 0.3, 0.3, 1.0);
+  col *= clamp(vLocal.y / 26.0 + 0.42, 0.42, 1.0);
 
   // 指数平方雾（与 scene.fog 一致）
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * vDist * vDist);
@@ -198,6 +213,9 @@ export interface Buildings {
   update(dt: number, t: number): void;
 }
 
+// 立面变体色：混入区域基色，形成锈橙/灰/绿灰/棕的拼布城市（参考原作日景材质）
+const FACADE_VARIANTS = [0x3a4048, 0x4a3720, 0x2f3835, 0x3f3326, 0x2b2f38];
+
 export function createBuildings(plots: Plot[], seed: number): Buildings {
   const styleById = new Map(DISTRICTS.map((d) => [d.id, d.style]));
   const rng = createRng(seed >>> 0);
@@ -217,6 +235,7 @@ export function createBuildings(plots: Plot[], seed: number): Buildings {
   for (const p of plots) byKind[p.kind].push(p);
 
   const tint = new THREE.Color();
+  const variant = new THREE.Color();
   const accent = new THREE.Color();
   const m = new THREE.Matrix4();
 
@@ -238,14 +257,15 @@ export function createBuildings(plots: Plot[], seed: number): Buildings {
       aScale.set([p.sx, p.h, p.sz], i * 3);
       const style = styleById.get(p.district)!;
       tint.setHex(style.facadeColor);
+      tint.lerp(variant.setHex(pick(rng, FACADE_VARIANTS)), 0.62);
       const jitter = range(rng, 0.8, 1.2);
       aTint.set([tint.r * jitter, tint.g * jitter, tint.b * jitter], i * 3);
       accent.setHex(pick(rng, style.neonPalette));
       aAccent.set([accent.r, accent.g, accent.b], i * 3);
       aLit[i] = p.litRate;
       aSeed[i] = range(rng, 0, 100);
-      // 约 1/5 的中高层楼有霓虹描边；高楼概率更高
-      aTrim[i] = rng() < (p.h > 120 ? 0.34 : 0.16) ? 1 : 0;
+      // 少量楼体有霓虹描边；高楼概率略高
+      aTrim[i] = rng() < (p.h > 120 ? 0.2 : 0.07) ? 1 : 0;
     });
 
     const geo = mesh.geometry;

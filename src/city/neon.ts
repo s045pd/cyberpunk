@@ -313,6 +313,7 @@ void main() {
 const AD_FRAG = /* glsl */ `
 uniform sampler2D uMap;
 uniform float uTime;
+uniform vec2 uTileScale;
 varying vec2 vUv;
 varying vec2 vUvOffset;
 varying float vSeed;
@@ -321,7 +322,7 @@ void main() {
   // 偶发水平故障错位
   float glitchGate = step(0.965, fract(uTime * 0.37 + vSeed));
   uv.x += glitchGate * (fract(vSeed * 91.7 + floor(vUv.y * 24.0) * 0.37) - 0.5) * 0.12;
-  vec4 t = texture2D(uMap, uv * vec2(0.25, 0.5) + vUvOffset);
+  vec4 t = texture2D(uMap, uv * uTileScale + vUvOffset);
   // 扫描线 + 缓慢滚动亮带 + 呼吸
   float scan = 0.82 + 0.18 * step(0.5, fract(vUv.y * 90.0));
   float sweep = 0.85 + 0.3 * smoothstep(0.12, 0.0,
@@ -330,6 +331,207 @@ void main() {
   gl_FragColor = vec4(t.rgb * scan * sweep * pulse * 1.9, 1.0);
 }
 `;
+
+/** 竖向巨幕图集：4 张"图像感"广告（人脸/竖排汉字/产品/抽象波），各 512×1024 */
+function buildMegaAtlas(): THREE.CanvasTexture {
+  const W = 2048;
+  const H = 1024;
+  const TW = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+
+  const tile = (i: number, fn: () => void) => {
+    ctx.save();
+    ctx.translate(i * TW, 0);
+    ctx.beginPath();
+    ctx.rect(0, 0, TW, H);
+    ctx.clip();
+    fn();
+    ctx.restore();
+  };
+
+  // 0: 电子人脸 —— 青蓝底 + 头部剪影 + 发光义眼
+  tile(0, () => {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#062a3a');
+    g.addColorStop(0.6, '#0a4a5e');
+    g.addColorStop(1, '#031018');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, TW, H);
+    ctx.fillStyle = '#04141c';
+    ctx.beginPath(); // 头 + 颈 + 肩剪影
+    ctx.ellipse(TW / 2, H * 0.34, 130, 175, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(TW / 2 - 55, H * 0.45, 110, H * 0.16);
+    ctx.beginPath();
+    ctx.ellipse(TW / 2, H * 0.72, 210, 130, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#5cf2ff';
+    ctx.shadowColor = '#5cf2ff';
+    ctx.shadowBlur = 24;
+    ctx.fillRect(TW / 2 - 92, H * 0.33, 68, 10); // 义眼光条
+    ctx.fillRect(TW / 2 + 26, H * 0.33, 68, 10);
+    ctx.shadowBlur = 14;
+    ctx.font = `700 ${TW * 0.11}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('KIBO-6', TW / 2, H * 0.9);
+  });
+
+  // 1: 竖排汉字灯幕
+  tile(1, () => {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#2a0416');
+    g.addColorStop(1, '#0c0108');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, TW, H);
+    ctx.fillStyle = '#ff2975';
+    ctx.shadowColor = '#ff2975';
+    ctx.shadowBlur = 30;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `900 ${TW * 0.34}px serif`;
+    ['夜', '未', '来'].forEach((ch, k) => {
+      ctx.fillText(ch, TW / 2, H * (0.18 + k * 0.28));
+    });
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = '#ffd24a';
+    ctx.font = `600 ${TW * 0.07}px sans-serif`;
+    ctx.fillText('AFTER DARK', TW / 2, H * 0.94);
+  });
+
+  // 2: 饮料产品 —— 罐体剪影 + 放射光
+  tile(2, () => {
+    ctx.fillStyle = '#120a02';
+    ctx.fillRect(0, 0, TW, H);
+    ctx.strokeStyle = 'rgba(255,158,61,0.35)';
+    ctx.lineWidth = 10;
+    for (let k = 0; k < 12; k++) { // 放射线
+      const a = (k / 12) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(TW / 2, H * 0.4);
+      ctx.lineTo(TW / 2 + Math.cos(a) * 600, H * 0.4 + Math.sin(a) * 600);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#ff9e3d';
+    ctx.shadowColor = '#ff9e3d';
+    ctx.shadowBlur = 30;
+    const rw = 150;
+    ctx.fillRect(TW / 2 - rw / 2, H * 0.2, rw, H * 0.42); // 罐体
+    ctx.fillRect(TW / 2 - rw / 2 + 18, H * 0.16, rw - 36, 22);
+    ctx.fillStyle = '#1a0d00';
+    ctx.shadowBlur = 0;
+    ctx.font = `900 ${TW * 0.1}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.save();
+    ctx.translate(TW / 2, H * 0.41);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('NEKO', 0, 0);
+    ctx.restore();
+    ctx.fillStyle = '#ffe600';
+    ctx.shadowColor = '#ffe600';
+    ctx.shadowBlur = 20;
+    ctx.font = `800 ${TW * 0.12}px sans-serif`;
+    ctx.fillText('飲め！', TW / 2, H * 0.82);
+  });
+
+  // 3: 抽象数据流 —— 双色波纹 + 字符雨
+  tile(3, () => {
+    const g = ctx.createLinearGradient(0, 0, TW, H);
+    g.addColorStop(0, '#10062b');
+    g.addColorStop(1, '#031b12');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, TW, H);
+    for (let k = 0; k < 9; k++) { // 波纹
+      ctx.strokeStyle = k % 2 === 0 ? 'rgba(185,107,255,0.7)' : 'rgba(0,255,213,0.6)';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      for (let x = 0; x <= TW; x += 16) {
+        const y = H * 0.12 + k * H * 0.09 + Math.sin(x * 0.02 + k * 1.7) * 26;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#00ffd5';
+    ctx.shadowColor = '#00ffd5';
+    ctx.shadowBlur = 16;
+    ctx.font = `700 ${TW * 0.075}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('DATASTREAM ¥¥¥', TW / 2, H * 0.93);
+  });
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/** 跨十几层楼的竖向巨幕 —— 原作天际线的标志元素 */
+function createMegaScreens(plots: Plot[], rng: Rng): THREE.InstancedMesh {
+  const candidates = plots
+    .filter((p) => p.h > 170)
+    .sort((a, b) => b.h - a.h)
+    .slice(0, 90);
+
+  interface ScreenSpec { matrix: THREE.Matrix4; uv: [number, number]; seed: number; }
+  const specs: ScreenSpec[] = [];
+  const pos = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const scl = new THREE.Vector3();
+  const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
+  for (const p of candidates) {
+    if (specs.length >= 48) break;
+    if (rng() > 0.62) continue;
+    const h = Math.min(p.h * 0.55, 190) * range(rng, 0.8, 1.05);
+    const w = h * 0.42;
+    const side = Math.floor(rng() * 4);
+    const offset = side % 2 === 0 ? p.sz / 2 + 1.4 : p.sx / 2 + 1.4;
+    pos.set(p.x, p.h * range(rng, 0.5, 0.68), p.z);
+    if (side === 0) pos.z += offset;
+    if (side === 1) pos.x += offset;
+    if (side === 2) pos.z -= offset;
+    if (side === 3) pos.x -= offset;
+    quat.setFromAxisAngle(Y_AXIS, (side * Math.PI) / 2);
+    scl.set(w, h, 1);
+    const tileIdx = Math.floor(rng() * 4);
+    specs.push({
+      matrix: new THREE.Matrix4().compose(pos, quat, scl),
+      uv: [tileIdx * 0.25, 0],
+      seed: rng() * 100,
+    });
+  }
+
+  const material = new THREE.ShaderMaterial({
+    vertexShader: AD_VERT,
+    fragmentShader: AD_FRAG,
+    uniforms: {
+      uMap: { value: buildMegaAtlas() },
+      uTime: { value: 0 },
+      uTileScale: { value: new THREE.Vector2(0.25, 1.0) },
+    },
+    side: THREE.DoubleSide,
+  });
+
+  const mesh = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(1, 1), material, specs.length,
+  );
+  mesh.frustumCulled = false;
+  const aUvOffset = new Float32Array(specs.length * 2);
+  const aSeed = new Float32Array(specs.length);
+  specs.forEach((s, i) => {
+    mesh.setMatrixAt(i, s.matrix);
+    aUvOffset.set(s.uv, i * 2);
+    aSeed[i] = s.seed;
+  });
+  const geo = mesh.geometry;
+  geo.setAttribute('aUvOffset', new THREE.InstancedBufferAttribute(aUvOffset, 2));
+  geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(aSeed, 1));
+  mesh.instanceMatrix.needsUpdate = true;
+  return mesh;
+}
 
 function createBillboards(plots: Plot[], rng: Rng): THREE.InstancedMesh {
   const tall = [...plots].sort((a, b) => b.h - a.h).slice(0, 320);
@@ -381,7 +583,11 @@ function createBillboards(plots: Plot[], rng: Rng): THREE.InstancedMesh {
   const material = new THREE.ShaderMaterial({
     vertexShader: AD_VERT,
     fragmentShader: AD_FRAG,
-    uniforms: { uMap: { value: buildAdAtlas() }, uTime: { value: 0 } },
+    uniforms: {
+      uMap: { value: buildAdAtlas() },
+      uTime: { value: 0 },
+      uTileScale: { value: new THREE.Vector2(0.25, 0.5) },
+    },
     side: THREE.DoubleSide,
   });
 
@@ -415,6 +621,8 @@ export function createNeon(plots: Plot[], seed: number): Neon {
   group.add(signs);
   const billboards = createBillboards(plots, rng);
   group.add(billboards);
+  const megaScreens = createMegaScreens(plots, rng);
+  group.add(megaScreens);
   const holos = createHolos(rng);
   for (const h of holos) group.add(h.mesh);
 
@@ -423,6 +631,7 @@ export function createNeon(plots: Plot[], seed: number): Neon {
     update(dt: number, t: number) {
       (signs.material as THREE.ShaderMaterial).uniforms.uTime.value = t;
       (billboards.material as THREE.ShaderMaterial).uniforms.uTime.value = t;
+      (megaScreens.material as THREE.ShaderMaterial).uniforms.uTime.value = t;
       for (const h of holos) {
         h.mesh.rotation.y += dt * h.speed;
         (h.mesh.material as THREE.ShaderMaterial).uniforms.uTime.value = t;

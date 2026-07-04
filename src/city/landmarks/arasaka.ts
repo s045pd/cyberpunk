@@ -12,9 +12,9 @@ function slab(w: number, h: number, d: number, y: number): THREE.Mesh {
 
 function glowBand(w: number, d: number, y: number, color: number): THREE.Mesh {
   const mat = new THREE.MeshStandardMaterial({
-    color: 0x000000, emissive: color, emissiveIntensity: 2.5,
+    color: 0x000000, emissive: color, emissiveIntensity: 1.5,
   });
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, 3, d), mat);
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, 1.6, d), mat);
   m.position.y = y;
   return m;
 }
@@ -36,10 +36,10 @@ export function createArasakaTower(): THREE.Group {
   g.add(slab(200, 200, 160, 240));
   g.add(slab(140, 160, 110, 440));
   g.add(slab(70, 90, 55, 600));
-  g.add(glowBand(264, 214, 238, 0xff2020));
-  g.add(glowBand(204, 164, 438, 0xff2020));
-  g.add(glowBand(144, 114, 598, 0xff2020));
-  g.add(glowBand(74, 59, 688, 0xff2020));
+  g.add(glowBand(261, 211, 238, 0xff2020));
+  g.add(glowBand(201, 161, 438, 0xff2020));
+  g.add(glowBand(141, 111, 598, 0xff2020));
+  g.add(glowBand(71, 56, 688, 0xff2020));
   // 中段四条竖向红缝
   g.add(seam(190, 245, 101.5, 0));
   g.add(seam(190, 245, -101.5, 0));

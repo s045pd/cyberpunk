@@ -75,7 +75,7 @@ void main() {
   float cityMask = 1.0 - smoothstep(${CITY_RADIUS}.0, 4400.0, length(vWorld));
 
   // 湿沥青（城内偏冷）/ 恶土干土（城外偏棕）
-  vec3 col = mix(vec3(0.030, 0.024, 0.018), vec3(0.014, 0.015, 0.020), cityMask);
+  vec3 col = mix(vec3(0.042, 0.035, 0.026), vec3(0.020, 0.022, 0.030), cityMask);
 
   float dx = roadDist(vWorld.x);
   float dz = roadDist(vWorld.y);
@@ -99,7 +99,7 @@ void main() {
   // 霓虹倒影：湿路面上晕开的城市光
   vec2 uv = vWorld / ${CITY_SIZE}.0 + 0.5;
   vec3 glow = texture2D(uGlow, uv).rgb;
-  col += glow * 0.22 * cityMask;
+  col += glow * 0.3 * cityMask;
 
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * vDist * vDist);
   col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));

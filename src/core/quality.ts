@@ -11,15 +11,15 @@ export interface QualityParams {
 export const QUALITY_PRESETS: QualityParams[] = [
   {
     name: 'ULTRA', renderScale: 1.0, rainScale: 1.0, trafficScale: 1.0,
-    bloomIntensity: 1.15, chromatic: true, lightning: true,
+    bloomIntensity: 1.0, chromatic: true, lightning: true,
   },
   {
     name: 'HIGH', renderScale: 0.85, rainScale: 0.6, trafficScale: 0.6,
-    bloomIntensity: 1.0, chromatic: false, lightning: true,
+    bloomIntensity: 0.85, chromatic: false, lightning: true,
   },
   {
     name: 'LOW', renderScale: 0.7, rainScale: 0.3, trafficScale: 0.3,
-    bloomIntensity: 0.55, chromatic: false, lightning: false,
+    bloomIntensity: 0.5, chromatic: false, lightning: false,
   },
 ];
 

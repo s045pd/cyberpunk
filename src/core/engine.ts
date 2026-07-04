@@ -18,8 +18,8 @@ export interface Engine {
   render(dt: number): void;
 }
 
-export const FOG_COLOR = 0x0c0a10;
-export const FOG_DENSITY = 0.00026;
+export const FOG_COLOR = 0x0d1013;
+export const FOG_DENSITY = 0.0003;
 
 export function createEngine(canvas: HTMLCanvasElement): Engine {
   const renderer = new THREE.WebGLRenderer({
@@ -50,9 +50,9 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   composer.addPass(new RenderPass(scene, camera));
 
   const bloom = new BloomEffect({
-    intensity: 1.35,
-    luminanceThreshold: 0.18,
-    luminanceSmoothing: 0.3,
+    intensity: 1.0,
+    luminanceThreshold: 0.4,
+    luminanceSmoothing: 0.25,
     mipmapBlur: true,
   });
   const chromatic = new ChromaticAberrationEffect({
@@ -61,8 +61,8 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     modulationOffset: 0.35,
   });
   const vignette = new VignetteEffect({ darkness: 0.6, offset: 0.3 });
-  const grade = new HueSaturationEffect({ saturation: 0.22 });
-  const contrast = new BrightnessContrastEffect({ brightness: -0.02, contrast: 0.14 });
+  const grade = new HueSaturationEffect({ saturation: 0.12 });
+  const contrast = new BrightnessContrastEffect({ brightness: 0.0, contrast: 0.08 });
   const tone = new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC });
   composer.addPass(new EffectPass(camera, bloom, grade, contrast, vignette, chromatic, tone));
 
