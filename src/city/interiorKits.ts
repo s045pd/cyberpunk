@@ -49,6 +49,61 @@ export const VENUE_COLORS: Record<VenueKind, number> = {
   pachinko: 0xff5030, ruin: 0x2a3438,
 };
 
+/** 门头单字（场所速读，解决"找不到酒吧"） */
+export const VENUE_GLYPHS: Record<VenueKind, string> = {
+  bar: '吧', bd: '梦', ripper: '医', food: '食', clothes: '衣',
+  guns: '枪', net: '网', residential: '宿', corpo: '社', motel: '旅',
+  warehouse: '仓', pachinko: '弹', ruin: '空',
+};
+
+const GLYPH_LIST = Object.values(VENUE_GLYPHS);
+
+function buildGlyphAtlas(): THREE.CanvasTexture {
+  const T = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = T * GLYPH_LIST.length;
+  canvas.height = T;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `900 ${T * 0.72}px serif`;
+  GLYPH_LIST.forEach((ch, i) => {
+    ctx.fillText(ch, i * T + T / 2, T / 2 + 4);
+  });
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const GLYPH_VERT = /* glsl */ `
+attribute float aGlyph;
+attribute vec3 aColor;
+varying vec2 vUv;
+varying float vGlyph;
+varying vec3 vColor;
+void main() {
+  vUv = uv;
+  vGlyph = aGlyph;
+  vColor = aColor;
+  gl_Position = projectionMatrix * viewMatrix * instanceMatrix * vec4(position, 1.0);
+}
+`;
+
+const GLYPH_FRAG = /* glsl */ `
+uniform sampler2D uMap;
+uniform float uCount;
+varying vec2 vUv;
+varying float vGlyph;
+varying vec3 vColor;
+void main() {
+  vec2 uv = vec2((vUv.x + vGlyph) / uCount, vUv.y);
+  vec4 t = texture2D(uMap, uv);
+  if (t.a < 0.3) discard;
+  gl_FragColor = vec4(vColor * 2.2, t.a);
+}
+`;
+
 /** 纯逻辑、可单测：按区域业态 + 楼高选场所 */
 export function venueFor(district: DistrictId, h: number, roll: number): VenueKind {
   // 市中心超高层几乎都是公司大堂
@@ -223,10 +278,17 @@ function furnish(kind: VenueKind, hx: number, hz: number, rng: Rng, put: PropPla
   }
 }
 
+export interface MinimapVenuePoint {
+  x: number;
+  z: number;
+  color: number;
+}
+
 export interface InteriorKits {
   group: THREE.Group;
   colliders: AABB[];
   venueOf(index: number): VenueKind;
+  venuePoints: MinimapVenuePoint[];
 }
 
 export function createInteriorKits(plots: Plot[], seed: number): InteriorKits {
@@ -237,8 +299,11 @@ export function createInteriorKits(plots: Plot[], seed: number): InteriorKits {
 
   interface DarkSpec { m: THREE.Matrix4; }
   interface GlowSpec { m: THREE.Matrix4; color: number; }
+  interface GlyphSpec { m: THREE.Matrix4; glyph: number; color: number; }
   const darks: DarkSpec[] = [];
   const glows: GlowSpec[] = [];
+  const glyphs: GlyphSpec[] = [];
+  const venuePoints: MinimapVenuePoint[] = [];
 
   const mat4 = () => new THREE.Matrix4();
 
@@ -293,6 +358,19 @@ export function createInteriorKits(plots: Plot[], seed: number): InteriorKits {
     m.scale(new THREE.Vector3(2.6, 0.5, 0.14));
     m.setPosition(dx, 4.0, dz);
     glows.push({ m, color: VENUE_COLORS[venue] });
+
+    // 门头文字（挂在色标灯箱上方，街上一眼可辨业态）
+    const gm = mat4().makeRotationY(yaw);
+    gm.scale(new THREE.Vector3(1.5, 1.5, 1));
+    gm.setPosition(
+      dx + (axisX ? side * 0.12 : 0), 5.3, dz + (axisX ? 0 : side * 0.12),
+    );
+    glyphs.push({
+      m: gm,
+      glyph: GLYPH_LIST.indexOf(VENUE_GLYPHS[venue]),
+      color: VENUE_COLORS[venue] === 0x2a3438 ? 0x4a5a60 : VENUE_COLORS[venue],
+    });
+    venuePoints.push({ x: p.x, z: p.z, color: VENUE_COLORS[venue] });
   }
 
   // 两个实例化网格承载全城家具
@@ -321,10 +399,45 @@ export function createInteriorKits(plots: Plot[], seed: number): InteriorKits {
   glowMesh.instanceMatrix.needsUpdate = true;
   if (glowMesh.instanceColor) glowMesh.instanceColor.needsUpdate = true;
 
-  group.add(darkMesh, glowMesh);
+  const glyphMesh = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.ShaderMaterial({
+      vertexShader: GLYPH_VERT,
+      fragmentShader: GLYPH_FRAG,
+      uniforms: {
+        uMap: { value: buildGlyphAtlas() },
+        uCount: { value: GLYPH_LIST.length },
+      },
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+    Math.max(glyphs.length, 1),
+  );
+  glyphMesh.count = glyphs.length;
+  glyphMesh.frustumCulled = false;
+  const aGlyph = new Float32Array(Math.max(glyphs.length, 1));
+  const aColor = new Float32Array(Math.max(glyphs.length, 1) * 3);
+  const gc = new THREE.Color();
+  glyphs.forEach((g, i) => {
+    glyphMesh.setMatrixAt(i, g.m);
+    aGlyph[i] = g.glyph;
+    gc.setHex(g.color);
+    aColor.set([gc.r, gc.g, gc.b], i * 3);
+  });
+  glyphMesh.geometry.setAttribute(
+    'aGlyph', new THREE.InstancedBufferAttribute(aGlyph, 1),
+  );
+  glyphMesh.geometry.setAttribute(
+    'aColor', new THREE.InstancedBufferAttribute(aColor, 3),
+  );
+  glyphMesh.instanceMatrix.needsUpdate = true;
+
+  group.add(darkMesh, glowMesh, glyphMesh);
   return {
     group,
     colliders,
     venueOf: (i: number) => venues[i] ?? 'residential',
+    venuePoints,
   };
 }
