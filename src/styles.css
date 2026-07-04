@@ -136,6 +136,102 @@ html, body { height: 100%; overflow: hidden; background: var(--color-bg); }
   97% { opacity: 0.6; }
 }
 
+/* ---------- 战斗 HUD ---------- */
+.chud-crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.chud-crosshair::before,
+.chud-crosshair::after {
+  content: '';
+  position: absolute;
+  background: rgba(252, 238, 10, 0.85);
+}
+
+.chud-crosshair::before { left: 6px; top: 0; width: 2px; height: 14px; }
+
+.chud-crosshair::after { top: 6px; left: 0; width: 14px; height: 2px; }
+
+.chud-crosshair.hit::before,
+.chud-crosshair.hit::after { background: #ff7a1a; }
+
+.chud-crosshair.kill::before,
+.chud-crosshair.kill::after { background: #ff2030; }
+
+.chud-ammo {
+  position: absolute;
+  bottom: 52px;
+  right: 24px;
+  color: var(--color-hud);
+  font-size: 17px;
+  letter-spacing: 0.12em;
+}
+
+.chud-hp {
+  position: absolute;
+  bottom: 52px;
+  left: 24px;
+  width: 180px;
+  height: 8px;
+  border: 1px solid rgba(252, 238, 10, 0.5);
+}
+
+.chud-hp-fill {
+  height: 100%;
+  width: 100%;
+  background: #35e07a;
+  transition: width 0.15s;
+}
+
+.chud-hp.low .chud-hp-fill { background: #ff2030; }
+
+.chud-stars {
+  position: absolute;
+  top: clamp(18px, 4vh, 44px);
+  right: clamp(18px, 4vw, 56px);
+  color: #ff2030;
+  font-size: 26px;
+  letter-spacing: 0.3em;
+  text-shadow: 0 0 12px rgba(255, 32, 48, 0.6);
+}
+
+.chud-flatlined {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(60, 0, 8, 0.55);
+  color: #ff2030;
+  font-size: clamp(38px, 6vw, 72px);
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  animation: boot-flicker 0.9s infinite;
+}
+
+.chud-flatlined span { font-size: 15px; color: #ffb0b8; }
+
+.chud-flatlined.on { display: flex; }
+
+.minimap {
+  position: absolute;
+  top: clamp(60px, 10vh, 100px);
+  right: 20px;
+  display: none;
+  border: 1px solid rgba(252, 238, 10, 0.4);
+  box-shadow: 0 0 18px rgba(0, 0, 0, 0.6);
+}
+
+.minimap.on { display: block; }
+
 /* ---------- 致命错误覆盖层 ---------- */
 .fatal {
   position: absolute;

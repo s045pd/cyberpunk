@@ -19,6 +19,17 @@ import { PedFleet, buildSidewalkPaths } from './people/pedestrians';
 import { pickIncidentSites, createIncidents } from './events/incidents';
 import { RescueDirector } from './events/rescue';
 import { ColliderGrid } from './core/collision';
+import { HealthRegistry } from './combat/damage';
+import { CombatFx } from './combat/tracers';
+import { CombatAudio } from './combat/audio';
+import { ViewModel } from './combat/viewmodel';
+import { PlayerCombat, PlayerTarget } from './combat/player';
+import { WantedSystem } from './events/wanted';
+import { planSquads } from './people/gangs';
+import { ActiveNpcPool } from './people/activeNpcs';
+import { ViolenceDirector } from './events/violence';
+import { CombatHud } from './ui/combatHud';
+import { Minimap } from './ui/minimap';
 import { createHighway } from './city/highway';
 import { createBridges } from './city/bridges';
 import { createNeon } from './city/neon';
@@ -178,6 +189,94 @@ async function start(): Promise<void> {
       dt, engine.camera.position.x, engine.camera.position.z,
     ),
   });
+
+  // ---------- 战斗系统 ----------
+  engine.scene.add(engine.camera);   // 第一人称视模挂相机，需要相机在场景树内
+  let nowSec = 0;
+  const health = new HealthRegistry();
+  const wanted = new WantedSystem();
+  const fx = new CombatFx();
+  engine.scene.add(fx.group);
+  updatables.push({ update: (dt) => fx.update(dt) });
+  const combatAudio = new CombatAudio();
+  const combatHud = new CombatHud(overlay);
+  const vm = new ViewModel(engine.camera);
+  const pool = new ActiveNpcPool({
+    seed: SEED, squads: planSquads(SEED), ncpdPairs: 8, health,
+  });
+  engine.scene.add(pool.group);
+
+  const gunshot = (x: number, z: number, t: number): void => {
+    peds.triggerPanic(x, z, t);
+  };
+
+  const director: ViolenceDirector = new ViolenceDirector({
+    pool, health, fx, audio: combatAudio, wanted, grid: colliderGrid,
+    onGunshot: gunshot,
+    onPlayerHit: (dmg, t) => playerCombat.takeDamage(dmg, t),
+    playerPos: () => engine.camera.position,
+    playerAlive: () => playerCombat.alive,
+  }, SEED);
+  updatables.push({ update: (dt, t) => director.update(dt, t) });
+
+  const playerCombat: PlayerCombat = new PlayerCombat({
+    camera: engine.camera, health, fx, audio: combatAudio, vm,
+    hud: combatHud, wanted, grid: colliderGrid,
+    enabled: () => modes.mode === 'walk' && walk.enabled,
+    onGunshot: gunshot,
+    gatherTargets: (t) => {
+      const out: PlayerTarget[] = [];
+      for (const u of pool.units) {
+        if (u.state === 'dead') continue;
+        out.push({
+          id: u.id, x: u.x, z: u.z, y0: 0, y1: u.height,
+          r: 0.38, headFrom: u.height * 0.82,
+          victim: {
+            id: u.id, isCivil: false, isCop: u.role === 'ncpd',
+            onHit: (_part, died) => {
+              director.onPlayerAttacked(u, t);
+              if (died) pool.applyDeath(u, t);
+            },
+          },
+        });
+      }
+      const pp = engine.camera.position;
+      peds.forEachWalkerNear(pp.x, pp.z, 60, t, (k, i, px, pz, h) => {
+        out.push({
+          id: `ped-${k}-${i}`, x: px, z: pz, y0: 0, y1: h,
+          r: 0.36, headFrom: h * 0.82,
+          victim: {
+            id: `ped-${k}-${i}`, isCivil: true, isCop: false,
+            onHit: (_part, died) => {
+              if (died) peds.killWalker(k, i, px, pz, t);
+            },
+          },
+        });
+      });
+      return out;
+    },
+  });
+  updatables.push(
+    { update: (dt, t) => playerCombat.update(dt, t) },
+    { update: (dt) => combatHud.update(dt) },
+    { update: (dt) => vm.update(dt) },
+    { update: () => {
+      wanted.tick(nowSec);
+      combatAudio.siren(wanted.stars > 0);
+    } },
+  );
+
+  const minimap = new Minimap(overlay, kits.venuePoints);
+  const mmEuler = new THREE.Euler();
+  updatables.push({
+    update: (dt) => {
+      mmEuler.setFromQuaternion(engine.camera.quaternion, 'YXZ');
+      minimap.update(
+        dt, engine.camera.position.x, engine.camera.position.z,
+        mmEuler.y, director.activeEvents(),
+      );
+    },
+  });
   updatables.push(
     { update: (dt) => fly.update(dt) },
     { update: (dt) => walk.update(dt) },
@@ -217,6 +316,7 @@ async function start(): Promise<void> {
     timer.update();
     const dt = Math.min(timer.getDelta(), 0.1);
     const t = timer.getElapsed();
+    nowSec = t;
     try {
       for (const u of updatables) u.update(dt, t);
       if (monitor.addFrame(dt)) applyQuality();

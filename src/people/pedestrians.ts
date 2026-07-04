@@ -67,7 +67,7 @@ interface HumanOpts {
   badge?: boolean;   // 胸前发光徽章
 }
 
-function buildHumanGeometry(o: HumanOpts): THREE.BufferGeometry {
+export function buildHumanGeometry(o: HumanOpts): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const hipY = 0.52;
   const legW = o.shoulder * 0.32;
@@ -99,7 +99,7 @@ function buildHumanGeometry(o: HumanOpts): THREE.BufferGeometry {
   return mergeGeometries(parts);
 }
 
-const ARCHETYPES: Record<PedKind, HumanOpts> = {
+export const ARCHETYPES: Record<PedKind, HumanOpts> = {
   man: { head: 0.11, shoulder: 0.30, hairLen: 0 },
   woman: { head: 0.10, shoulder: 0.24, hairLen: 0.2 },
   elder: { head: 0.105, shoulder: 0.26, hairLen: 0, cane: true },
@@ -156,6 +156,7 @@ attribute vec3 aAnim;      // (seed, 步频/米, 摆幅)，步频 0 = 静止
 attribute vec4 aPath;      // (起点 x, 起点 z, 方向 x, 方向 z)
 attribute vec4 aMove;      // (路径长, 初始里程, 米/秒, 右侧偏移)
 uniform float uTime;
+uniform vec4 uPanic[4];    // (x, z, 半径, 触发时刻)：枪声恐慌波
 varying float vPart;
 varying vec3 vClothes;
 varying vec3 vSkin;
@@ -171,6 +172,14 @@ void main() {
   vNormal = normalize(mat3(instanceMatrix) * normal);
 
   float walked = aMove.y + aMove.z * uTime;
+  // 恐慌波：枪声半径内 8 秒冲刺（追加里程 → 位移加速 + 步频变快）
+  vec2 probe = aPath.xy + aPath.zw * mod(walked, max(aMove.x, 1.0));
+  for (int pi = 0; pi < 4; pi++) {
+    float age = uTime - uPanic[pi].w;
+    if (age > 0.0 && age < 8.0 && distance(probe, uPanic[pi].xy) < uPanic[pi].z) {
+      walked += age * aMove.z * 2.2;
+    }
+  }
   float d = mod(walked, max(aMove.x, 1.0));
   vec2 base = aPath.xy + aPath.zw * d + vec2(aPath.w, -aPath.z) * aMove.w;
 
@@ -227,6 +236,24 @@ void main() {
 }
 `;
 
+export function createPedMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    vertexShader: VERT,
+    fragmentShader: FRAG,
+    uniforms: {
+      uTime: { value: 0 },
+      uFogColor: { value: new THREE.Color(FOG_COLOR) },
+      uFogDensity: { value: FOG_DENSITY },
+      uPanic: {
+        value: [
+          new THREE.Vector4(0, 0, 0, -1e9), new THREE.Vector4(0, 0, 0, -1e9),
+          new THREE.Vector4(0, 0, 0, -1e9), new THREE.Vector4(0, 0, 0, -1e9),
+        ],
+      },
+    },
+  });
+}
+
 /* ---------- 行人群 ---------- */
 
 export interface StaticPed {
@@ -274,18 +301,19 @@ export class PedFleet {
   private staticCounts: number[] = [];
   private walkerCounts: number[] = [];
   private material: THREE.ShaderMaterial;
+  private attrRefs: Array<{
+    path: Float32Array;
+    move: Float32Array;
+    anim: Float32Array;
+    heights: number[];
+    mesh: THREE.InstancedMesh;
+  }> = [];
+  private deadWalkers: Array<{ k: number; i: number; at: number }> = [];
+  private panicSlot = 0;
 
   constructor(opts: PedFleetOptions) {
     const rng: Rng = createRng(opts.seed >>> 0);
-    this.material = new THREE.ShaderMaterial({
-      vertexShader: VERT,
-      fragmentShader: FRAG,
-      uniforms: {
-        uTime: { value: 0 },
-        uFogColor: { value: new THREE.Color(FOG_COLOR) },
-        uFogDensity: { value: FOG_DENSITY },
-      },
-    });
+    this.material = createPedMaterial();
 
     // 静态人员排在桶前部（setDensity 截尾只隐藏行走者）
     const buckets = new Map<PedKind, PedEntry[]>();
@@ -366,8 +394,10 @@ export class PedFleet {
       for (let i = 0; i < n; i++) aMove[i * 4] = 1; // len 默认 1
       let statics = 0;
       let walkers = 0;
+      const heights: number[] = [];
 
       list.forEach((entry, i) => {
+        heights.push(entry.height);
         clothes.setHex(prof.clothes ? pick(rng, prof.clothes) : pick(rng, CLOTHES));
         skin.setHex(pick(rng, SKINS));
         const accentHex = prof.accent
@@ -408,6 +438,7 @@ export class PedFleet {
       geo.setAttribute('aPath', new THREE.InstancedBufferAttribute(aPath, 4));
       geo.setAttribute('aMove', new THREE.InstancedBufferAttribute(aMove, 4));
       mesh.instanceMatrix.needsUpdate = true;
+      this.attrRefs.push({ path: aPath, move: aMove, anim: aAnim, heights, mesh });
       this.staticCounts.push(statics);
       this.walkerCounts.push(walkers);
       this.meshes.push(mesh);
@@ -423,8 +454,102 @@ export class PedFleet {
     });
   }
 
-  /** 位移在 GPU：每帧仅推进时间 uniform */
+  /** 反算某行走者当前位置（与 vertex shader 同公式）；死者/静态返回 null */
+  resolveWalker(
+    k: number, i: number, t: number,
+  ): { x: number; z: number; height: number } | null {
+    const ref = this.attrRefs[k];
+    if (!ref) return null;
+    if (i < this.staticCounts[k]
+      || i >= this.staticCounts[k] + this.walkerCounts[k]) return null;
+    const speed = ref.move[i * 4 + 2];
+    if (speed === 0) return null; // 已死亡或静止
+    const len = Math.max(ref.move[i * 4], 1);
+    const d = ((ref.move[i * 4 + 1] + speed * t) % len + len) % len;
+    const sx = ref.path[i * 4];
+    const sz = ref.path[i * 4 + 1];
+    const dx = ref.path[i * 4 + 2];
+    const dz = ref.path[i * 4 + 3];
+    const lat = ref.move[i * 4 + 3];
+    return {
+      x: sx + dx * d + dz * lat,
+      z: sz + dz * d - dx * lat,
+      height: ref.heights[i],
+    };
+  }
+
+  /** 击杀行走者：速度/步态归零，矩阵改为命中点倒地，20s 后淡出 */
+  killWalker(k: number, i: number, atX: number, atZ: number, t: number): void {
+    const ref = this.attrRefs[k];
+    if (!ref) return;
+    ref.move.set([1, 0, 0, 0], i * 4);
+    ref.path.set([0, 0, 0, 0], i * 4);
+    ref.anim[i * 3 + 1] = 0;
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(-Math.PI / 2, 0, (atX + atZ) % 3.14),
+    );
+    m.compose(
+      new THREE.Vector3(atX, 0.14, atZ), q,
+      new THREE.Vector3(ref.heights[i], ref.heights[i], ref.heights[i]),
+    );
+    ref.mesh.setMatrixAt(i, m);
+    ref.mesh.instanceMatrix.needsUpdate = true;
+    ref.mesh.geometry.getAttribute('aMove').needsUpdate = true;
+    ref.mesh.geometry.getAttribute('aPath').needsUpdate = true;
+    ref.mesh.geometry.getAttribute('aAnim').needsUpdate = true;
+    this.deadWalkers.push({ k, i, at: t });
+  }
+
+  /** 遍历半径内行走者（命中候选收集用） */
+  forEachWalkerNear(
+    x: number, z: number, radius: number, t: number,
+    fn: (k: number, i: number, px: number, pz: number, height: number) => void,
+  ): void {
+    const r2 = radius * radius;
+    for (let k = 0; k < this.attrRefs.length; k++) {
+      const start = this.staticCounts[k];
+      const end = start + this.walkerCounts[k];
+      for (let i = start; i < end; i++) {
+        const p = this.resolveWalker(k, i, t);
+        if (!p) continue;
+        const dx = p.x - x;
+        const dz = p.z - z;
+        if (dx * dx + dz * dz <= r2) fn(k, i, p.x, p.z, p.height);
+      }
+    }
+  }
+
+  /** 枪声恐慌波：半径内行人奔跑逃散（纯 shader，4 槽轮换） */
+  triggerPanic(x: number, z: number, t: number, radius = 300): void {
+    const u = this.material.uniforms.uPanic.value as THREE.Vector4[];
+    u[this.panicSlot].set(x, z, radius, t);
+    this.panicSlot = (this.panicSlot + 1) % u.length;
+  }
+
+  /** 尸体淡出：20s 后 1s 内下沉回收 */
+  private fadeCorpses(t: number): void {
+    for (let d = this.deadWalkers.length - 1; d >= 0; d--) {
+      const c = this.deadWalkers[d];
+      const age = t - c.at;
+      if (age < 20) continue;
+      const ref = this.attrRefs[c.k];
+      const m = new THREE.Matrix4();
+      ref.mesh.getMatrixAt(c.i, m);
+      if (age >= 21) {
+        m.setPosition(0, -500, 0);
+        this.deadWalkers.splice(d, 1);
+      } else {
+        m.elements[13] = 0.14 - (age - 20) * 0.6;
+      }
+      ref.mesh.setMatrixAt(c.i, m);
+      ref.mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  /** 位移在 GPU：每帧推进时间 uniform + 少量尸体淡出 */
   update(_dt: number, t: number): void {
     this.material.uniforms.uTime.value = t;
+    this.fadeCorpses(t);
   }
 }

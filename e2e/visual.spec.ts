@@ -33,3 +33,16 @@ test('切换漫游模式后正常渲染', async ({ page }, testInfo) => {
   });
   expect(errors).toEqual([]);
 });
+
+test('开火消耗弹药且不报错', async ({ page }, testInfo) => {
+  const errors = await jackIn(page);
+  await page.keyboard.press('KeyF');
+  await page.waitForTimeout(3500);
+  await page.mouse.move(960, 540);
+  await page.mouse.down();
+  await page.waitForTimeout(600);
+  await page.mouse.up();
+  await expect(page.locator('.chud-ammo')).not.toContainText('12/∞');
+  await page.screenshot({ path: testInfo.outputPath('combat.png'), fullPage: true });
+  expect(errors).toEqual([]);
+});
