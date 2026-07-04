@@ -5,6 +5,8 @@ import { rayCapsule, firstHit, marchBlocked } from '../src/combat/hitreg';
 import { ColliderGrid } from '../src/core/collision';
 import { WantedSystem } from '../src/events/wanted';
 import { GANGS, planSquads } from '../src/people/gangs';
+import * as THREE from 'three';
+import { PedFleet } from '../src/people/pedestrians';
 import { districtAt } from '../src/city/districts';
 
 describe('HealthRegistry', () => {
@@ -193,5 +195,54 @@ describe('gangs', () => {
 
   it('确定性', () => {
     expect(planSquads(7)).toEqual(planSquads(7));
+  });
+});
+
+function tinyFleet(): PedFleet {
+  return new PedFleet({
+    lanes: [{
+      curve: new THREE.LineCurve3(
+        new THREE.Vector3(0, 0, 0), new THREE.Vector3(100, 0, 0),
+      ),
+      count: 8,
+    }],
+    seed: 42,
+  });
+}
+
+describe('PedFleet 战斗接口', () => {
+  it('resolveWalker 反算位置沿路径且确定', () => {
+    const fleet = tinyFleet();
+    const p = fleet.resolveWalker(0, 0, 3.5);
+    if (p) {
+      expect(p.x).toBeGreaterThanOrEqual(-3);
+      expect(p.x).toBeLessThanOrEqual(103);
+      expect(Math.abs(p.z)).toBeLessThanOrEqual(2.2);
+      expect(p.height).toBeGreaterThan(0.9);
+    }
+    expect(fleet.resolveWalker(0, 0, 3.5)).toEqual(p);
+  });
+
+  it('killWalker 后不再参与命中', () => {
+    const fleet = tinyFleet();
+    let found: [number, number] | null = null;
+    fleet.forEachWalkerNear(50, 0, 200, 2, (k, i) => {
+      if (!found) found = [k, i];
+    });
+    expect(found).not.toBeNull();
+    const [k, i] = found!;
+    const before = fleet.resolveWalker(k, i, 2)!;
+    fleet.killWalker(k, i, before.x, before.z, 2);
+    expect(fleet.resolveWalker(k, i, 5)).toBeNull();
+  });
+
+  it('forEachWalkerNear 半径过滤', () => {
+    const fleet = tinyFleet();
+    let count = 0;
+    fleet.forEachWalkerNear(0, 0, 30, 1, () => count++);
+    let all = 0;
+    fleet.forEachWalkerNear(50, 0, 10000, 1, () => all++);
+    expect(all).toBeGreaterThanOrEqual(count);
+    expect(all).toBeGreaterThan(0);
   });
 });
